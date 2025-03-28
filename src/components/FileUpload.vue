@@ -95,16 +95,32 @@ onMounted(() => {
     <button @click="uploadFile">Upload</button>
 
     <h2>Uploaded Files</h2>
-    <ul>
-      <li v-for="file in files" :key="file.id">
-        <strong>{{ file.name }}</strong> ({{ file.size }} bytes, {{ file.contentType }})
-        <ul>
-          <li v-for="meta in file.metadata" :key="meta.key">
-            {{ meta.key }}: {{ meta.value }}
-          </li>
-        </ul>
-      </li>
-    </ul>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Size (bytes)</th>
+          <th>Content Type</th>
+          <th>Created At</th>
+          <th>Metadata</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in files" :key="item.id">
+          <td>{{ item.name }}</td>
+          <td>{{ item.size }}</td>
+          <td>{{ item.contentType }}</td>
+          <td>{{ item.createdAt }}</td>
+          <td>
+            <ul>
+              <li v-for="meta in item.metadata" :key="meta.key">
+                {{ meta.key }}: {{ meta.value }}
+              </li>
+            </ul>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </template>
 

@@ -5,18 +5,18 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
 ## Backend
 
 ### Tekniker
-- **Språk:** Go
-- **Databas:** SQLite (lagras som en fil)
+- **Språk:** Go  
+- **Databas:** SQLite (lagras som en fil)  
 - **API:** GraphQL (med hjälp av `gqlgen`)
 
 ### Funktioner
-- Hanterar filuppladdningar och metadata.
-- Använder SQLite som en lättviktig databas.
+- Hanterar filuppladdningar och metadata.  
+- Använder SQLite som en lättviktig databas.  
 - Tillhandahåller ett GraphQL API för frontend-kommunikation.
 
 ### Hur man startar backend
-1. Se till att du har Go installerat.
-2. Installera nödvändiga beroenden:
+1. Öppna en terminal i projektmappen `~\e-Arkive\graphql-backend`.
+2. Installera nödvändiga beroenden:  
    ```bash
    go mod tidy
    ```
@@ -24,7 +24,7 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
    ```bash
    go run .
    ```
-4. Backend körs på `http://localhost:8080`. Du kan använda GraphQL Playground på `http://localhost:8080/`.
+4. Backend körs på `http://localhost:8080`. Du kan använda GraphQL Playground på `http://localhost:8080/sandbox`.
 
 ## Frontend
 
