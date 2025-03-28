@@ -2,22 +2,44 @@
 
 package model
 
-type Mutation struct {
+type File struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Size        int         `json:"size"`
+	ContentType string      `json:"contentType"`
+	CreatedAt   string      `json:"createdAt"`
+	Metadata    []*Metadata `json:"metadata,omitempty"`
 }
 
-type NewTodo struct {
-	Text   string `json:"text"`
-	UserID string `json:"userId"`
+type FileInput struct {
+	Name        string           `json:"name"`
+	Size        int              `json:"size"`
+	ContentType string           `json:"contentType"`
+	Metadata    []*MetadataInput `json:"metadata,omitempty"`
+}
+
+type Metadata struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type MetadataInput struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type Mutation struct {
 }
 
 type Query struct {
 }
 
 type Todo struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	Done bool   `json:"done"`
-	User *User  `json:"user"`
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Done   bool   `json:"done"`
+	User   *User  `json:"user"`
+	userID string `json:"-"`
 }
 
 type User struct {

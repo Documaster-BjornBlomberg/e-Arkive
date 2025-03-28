@@ -15,16 +15,38 @@ type User {
 }
 
 type Query {
-  todos: [Todo!]!
+  getFiles: [File!]!
+  getFile(id: ID!): File
   hello: String!
 }
 
-input NewTodo {
-  text: String!
-  userId: String!
+type Mutation {
+  saveFile(input: FileInput!): File!
 }
 
-type Mutation {
-  createTodo(input: NewTodo!): Todo!
+type File {
+  id: ID!
+  name: String!
+  size: Int!
+  contentType: String!
+  createdAt: String!
+  metadata: [Metadata!]
+}
+
+type Metadata {
+  key: String!
+  value: String!
+}
+
+input FileInput {
+  name: String!
+  size: Int!
+  contentType: String!
+  metadata: [MetadataInput!]
+}
+
+input MetadataInput {
+  key: String!
+  value: String!
 }
 

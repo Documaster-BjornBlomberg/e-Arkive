@@ -10,21 +10,74 @@ import (
 	"graphql-backend/graph/model"
 )
 
-// CreateTodo is the resolver for the createTodo field.
-func (r *mutationResolver) CreateTodo(ctx context.Context, input model.NewTodo) (*model.Todo, error) {
-	panic(fmt.Errorf("not implemented: CreateTodo - createTodo"))
+// SaveFile is the resolver for the saveFile field.
+func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) (*model.File, error) {
+	// Simulate saving the file to the database
+	file := &model.File{
+		ID:          "1", // Replace with actual ID generation logic
+		Name:        input.Name,
+		Size:        input.Size,
+		ContentType: input.ContentType,
+		CreatedAt:   "2025-03-28", // Replace with actual timestamp
+		Metadata:    []*model.Metadata{},
+	}
+
+	// Add metadata if provided
+	for _, meta := range input.Metadata {
+		file.Metadata = append(file.Metadata, &model.Metadata{
+			Key:   meta.Key,
+			Value: meta.Value,
+		})
+	}
+
+	return file, nil
 }
 
-// Todos is the resolver for the todos field.
-func (r *queryResolver) Todos(ctx context.Context) ([]*model.Todo, error) {
-	panic(fmt.Errorf("not implemented: Todos - todos"))
+// GetFiles is the resolver for the getFiles field.
+func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
+	// Simulate fetching files from the database
+	return []*model.File{
+		{
+			ID:          "1",
+			Name:        "example.txt",
+			Size:        1234,
+			ContentType: "text/plain",
+			CreatedAt:   "2025-03-28",
+			Metadata: []*model.Metadata{
+				{Key: "author", Value: "John Doe"},
+			},
+		},
+	}, nil
 }
 
-// Mutation returns MutationResolver implementation.
-func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+// GetFile is the resolver for the getFile field.
+func (r *queryResolver) GetFile(ctx context.Context, id string) (*model.File, error) {
+	// Simulate fetching a single file by ID from the database
+	if id == "1" {
+		return &model.File{
+			ID:          "1",
+			Name:        "example.txt",
+			Size:        1234,
+			ContentType: "text/plain",
+			CreatedAt:   "2025-03-28",
+			Metadata: []*model.Metadata{
+				{Key: "author", Value: "John Doe"},
+			},
+		}, nil
+	}
+	return nil, fmt.Errorf("file not found")
+}
 
-// Query returns QueryResolver implementation.
-func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
+// Hello is the resolver for the hello field.
+func (r *queryResolver) Hello(ctx context.Context) (string, error) {
+	return "Hello, world!", nil
+}
+
+// User is the resolver for the user field.
+func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
+	panic(fmt.Errorf("not implemented: User - user"))
+}
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type todoResolver struct{ *Resolver }
