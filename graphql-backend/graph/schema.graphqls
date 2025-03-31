@@ -17,6 +17,7 @@ type User {
 type Query {
   getFiles: [File!]!
   getFile(id: ID!): File
+  downloadFile(id: ID!): File
   hello: String!
 }
 
@@ -30,6 +31,7 @@ type File {
   size: Int!
   contentType: String!
   createdAt: String!
+  fileData: String  # Base64-encoded file data
   metadata: [Metadata!]
 }
 
@@ -42,6 +44,7 @@ input FileInput {
   name: String!
   size: Int!
   contentType: String!
+  fileData: String!  # Base64-encoded file data
   metadata: [MetadataInput!]
 }
 

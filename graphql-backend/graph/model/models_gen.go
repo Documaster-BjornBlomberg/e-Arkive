@@ -8,6 +8,7 @@ type File struct {
 	Size        int         `json:"size"`
 	ContentType string      `json:"contentType"`
 	CreatedAt   string      `json:"createdAt"`
+	FileData    string      `json:"fileData,omitempty"`
 	Metadata    []*Metadata `json:"metadata,omitempty"`
 }
 
@@ -15,6 +16,7 @@ type FileInput struct {
 	Name        string           `json:"name"`
 	Size        int              `json:"size"`
 	ContentType string           `json:"contentType"`
+	FileData    string           `json:"fileData"`
 	Metadata    []*MetadataInput `json:"metadata,omitempty"`
 }
 

@@ -1,11 +1,17 @@
 -- database: e-Arkive.db
--- Create table for storing files
+
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS metadata;
+DROP TABLE IF EXISTS files;
+
+-- Create table for storing files with BLOB support
 CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     size INTEGER NOT NULL,
     content_type TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    file_data BLOB
 );
 
 -- Create table for storing metadata associated with files
