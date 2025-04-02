@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"graphql-backend/graph"
 	"log"
@@ -141,7 +142,9 @@ func main() {
 	http.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
 		logAction("GraphQL query received")
-		srv.ServeHTTP(w, r)
+		responseRecorder := &responseLogger{ResponseWriter: w}
+		srv.ServeHTTP(responseRecorder, r)
+		log.Printf("Response sent: %s", responseRecorder.body.String())
 	})
 
 	http.HandleFunc("/graphiql", func(w http.ResponseWriter, r *http.Request) {
@@ -190,3 +193,14 @@ var sandboxHTML = []byte(`
 </body>
 
 </html>`)
+
+// Define a responseLogger to capture the response body
+type responseLogger struct {
+	http.ResponseWriter
+	body bytes.Buffer
+}
+
+func (rl *responseLogger) Write(b []byte) (int, error) {
+	rl.body.Write(b)
+	return rl.ResponseWriter.Write(b)
+}

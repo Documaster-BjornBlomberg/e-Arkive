@@ -8,7 +8,7 @@ type File struct {
 	Size        int         `json:"size"`
 	ContentType string      `json:"contentType"`
 	CreatedAt   string      `json:"createdAt"`
-	FileData    string      `json:"fileData,omitempty"`
+	FileData    *string     `json:"fileData,omitempty"`
 	Metadata    []*Metadata `json:"metadata,omitempty"`
 }
 

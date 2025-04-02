@@ -62,7 +62,6 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
 ## Projektstruktur
 
 ```plaintext
-...existing code...
 ├── backend/               # Backend-kod
 │   ├── graph/             # GraphQL-schema och resolvers
 │   ├── e-Arkive.db        # SQLite-databasfil
@@ -72,3 +71,19 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
 │   └── vite.config.js     # Vite-konfiguration
 └── README.md              # Projektbeskrivning
 ```
+
+### Uppdatera GraphQL-koden
+
+Om du gör ändringar i GraphQL-schemat eller resolvrarna, måste du generera om koden med `gqlgen`. Följ dessa steg:
+
+1. Installera `gqlgen` och dess beroenden:
+   ```bash
+   go get github.com/99designs/gqlgen@v0.17.69
+   ```
+
+2. Generera om koden:
+   ```bash
+   go run github.com/99designs/gqlgen
+   ```
+
+3. Efter att koden har genererats om, kontrollera `schema.resolvers.go` för att säkerställa att alla resolvrar är korrekt implementerade. Om några resolvrar saknas eller behöver uppdateras, implementera dem manuellt.

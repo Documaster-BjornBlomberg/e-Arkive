@@ -1,6 +1,8 @@
 // Package graph innehåller alla GraphQL-relaterade implementationer
 package graph
 
+import "database/sql"
+
 // This file will not be regenerated automatically.
 // It serves as dependency injection for your app, add any dependencies you require here.
 
@@ -20,4 +22,14 @@ func (r *Resolver) Query() QueryResolver {
 // Detta är en del av exempel-implementationen och kan tas bort om det inte behövs
 func (r *Resolver) Todo() TodoResolver {
 	return &todoResolver{r}
+}
+
+// NewResolver skapar en ny instans av Resolver med den givna databasen.
+func NewResolver(db *sql.DB) *Resolver {
+	return &Resolver{DB: db}
+}
+
+// Ensure the Resolver struct is properly defined with a DB field.
+type Resolver struct {
+	DB *sql.DB
 }

@@ -23,6 +23,7 @@ type Query {
 
 type Mutation {
   saveFile(input: FileInput!): File!
+  deleteFile(id: ID!): Boolean!
 }
 
 type File {
