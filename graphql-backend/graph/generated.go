@@ -64,8 +64,10 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		DeleteFile func(childComplexity int, id string) int
-		SaveFile   func(childComplexity int, input model.FileInput) int
+		DeleteFile     func(childComplexity int, id string) int
+		DeleteMetadata func(childComplexity int, fileID string, keys []string) int
+		SaveFile       func(childComplexity int, input model.FileInput) int
+		UpdateMetadata func(childComplexity int, fileID string, metadataInput []*model.MetadataInput) int
 	}
 
 	Query struct {
@@ -91,6 +93,8 @@ type ComplexityRoot struct {
 type MutationResolver interface {
 	SaveFile(ctx context.Context, input model.FileInput) (*model.File, error)
 	DeleteFile(ctx context.Context, id string) (bool, error)
+	UpdateMetadata(ctx context.Context, fileID string, metadataInput []*model.MetadataInput) (*model.File, error)
+	DeleteMetadata(ctx context.Context, fileID string, keys []string) (*model.File, error)
 }
 type QueryResolver interface {
 	GetFiles(ctx context.Context) ([]*model.File, error)
@@ -196,6 +200,18 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.Mutation.DeleteFile(childComplexity, args["id"].(string)), true
 
+	case "Mutation.deleteMetadata":
+		if e.complexity.Mutation.DeleteMetadata == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteMetadata_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DeleteMetadata(childComplexity, args["fileId"].(string), args["keys"].([]string)), true
+
 	case "Mutation.saveFile":
 		if e.complexity.Mutation.SaveFile == nil {
 			break
@@ -207,6 +223,18 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Mutation.SaveFile(childComplexity, args["input"].(model.FileInput)), true
+
+	case "Mutation.updateMetadata":
+		if e.complexity.Mutation.UpdateMetadata == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateMetadata_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateMetadata(childComplexity, args["fileId"].(string), args["metadataInput"].([]*model.MetadataInput)), true
 
 	case "Query.downloadFile":
 		if e.complexity.Query.DownloadFile == nil {
@@ -437,6 +465,47 @@ func (ec *executionContext) field_Mutation_deleteFile_argsID(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_deleteMetadata_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_deleteMetadata_argsFileID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["fileId"] = arg0
+	arg1, err := ec.field_Mutation_deleteMetadata_argsKeys(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["keys"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_deleteMetadata_argsFileID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("fileId"))
+	if tmp, ok := rawArgs["fileId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_deleteMetadata_argsKeys(
+	ctx context.Context,
+	rawArgs map[string]any,
+) ([]string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("keys"))
+	if tmp, ok := rawArgs["keys"]; ok {
+		return ec.unmarshalNString2ᚕstringᚄ(ctx, tmp)
+	}
+
+	var zeroVal []string
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_saveFile_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -457,6 +526,47 @@ func (ec *executionContext) field_Mutation_saveFile_argsInput(
 	}
 
 	var zeroVal model.FileInput
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_updateMetadata_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_updateMetadata_argsFileID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["fileId"] = arg0
+	arg1, err := ec.field_Mutation_updateMetadata_argsMetadataInput(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["metadataInput"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_updateMetadata_argsFileID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("fileId"))
+	if tmp, ok := rawArgs["fileId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_updateMetadata_argsMetadataInput(
+	ctx context.Context,
+	rawArgs map[string]any,
+) ([]*model.MetadataInput, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("metadataInput"))
+	if tmp, ok := rawArgs["metadataInput"]; ok {
+		return ec.unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx, tmp)
+	}
+
+	var zeroVal []*model.MetadataInput
 	return zeroVal, nil
 }
 
@@ -1145,6 +1255,148 @@ func (ec *executionContext) fieldContext_Mutation_deleteFile(ctx context.Context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteFile_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateMetadata(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_updateMetadata(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().UpdateMetadata(rctx, fc.Args["fileId"].(string), fc.Args["metadataInput"].([]*model.MetadataInput))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*model.File)
+	fc.Result = res
+	return ec.marshalNFile2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateMetadata(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_File_id(ctx, field)
+			case "name":
+				return ec.fieldContext_File_name(ctx, field)
+			case "size":
+				return ec.fieldContext_File_size(ctx, field)
+			case "contentType":
+				return ec.fieldContext_File_contentType(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_File_createdAt(ctx, field)
+			case "fileData":
+				return ec.fieldContext_File_fileData(ctx, field)
+			case "metadata":
+				return ec.fieldContext_File_metadata(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateMetadata_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteMetadata(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_deleteMetadata(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().DeleteMetadata(rctx, fc.Args["fileId"].(string), fc.Args["keys"].([]string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*model.File)
+	fc.Result = res
+	return ec.marshalNFile2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_deleteMetadata(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_File_id(ctx, field)
+			case "name":
+				return ec.fieldContext_File_name(ctx, field)
+			case "size":
+				return ec.fieldContext_File_size(ctx, field)
+			case "contentType":
+				return ec.fieldContext_File_contentType(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_File_createdAt(ctx, field)
+			case "fileData":
+				return ec.fieldContext_File_fileData(ctx, field)
+			case "metadata":
+				return ec.fieldContext_File_metadata(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteMetadata_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -3980,6 +4232,20 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "updateMetadata":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateMetadata(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deleteMetadata":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteMetadata(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4717,6 +4983,21 @@ func (ec *executionContext) marshalNMetadata2ᚖgraphqlᚑbackendᚋgraphᚋmode
 	return ec._Metadata(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx context.Context, v any) ([]*model.MetadataInput, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]*model.MetadataInput, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
 func (ec *executionContext) unmarshalNMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx context.Context, v any) (*model.MetadataInput, error) {
 	res, err := ec.unmarshalInputMetadataInput(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
@@ -4735,6 +5016,36 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]string, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNString2string(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNString2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNString2string(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) marshalNUser2graphqlᚑbackendᚋgraphᚋmodelᚐUser(ctx context.Context, sel ast.SelectionSet, v model.User) graphql.Marshaler {
