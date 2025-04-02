@@ -118,6 +118,128 @@ func (r *mutationResolver) DeleteFile(ctx context.Context, id string) (bool, err
 	return true, nil
 }
 
+// UpdateMetadata är resolvern för updateMetadata-mutation
+// Uppdaterar metadata för en fil
+func (r *mutationResolver) UpdateMetadata(ctx context.Context, fileID string, metadataInput []*model.MetadataInput) (*model.File, error) {
+	logAction(fmt.Sprintf("Attempting to update metadata for file with ID: %s", fileID))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Kontrollera att filen finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM files WHERE id = ?)", fileID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if file exists: %v", err)
+		return nil, fmt.Errorf("failed to check if file exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("No file found with ID: %s", fileID)
+		return nil, fmt.Errorf("file not found")
+	}
+
+	// Starta en transaktion för att säkerställa att alla operationer lyckas eller misslyckas tillsammans
+	tx, err := r.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Ta bort befintlig metadata för filen
+	_, err = tx.Exec("DELETE FROM metadata WHERE file_id = ?", fileID)
+	if err != nil {
+		log.Printf("Error deleting existing metadata: %v", err)
+		return nil, fmt.Errorf("failed to delete existing metadata: %v", err)
+	}
+
+	// Lägg till ny metadata
+	for _, meta := range metadataInput {
+		_, err := tx.Exec(
+			"INSERT INTO metadata (file_id, key, value) VALUES (?, ?, ?)",
+			fileID, meta.Key, meta.Value,
+		)
+		if err != nil {
+			log.Printf("Error inserting metadata: %v", err)
+			return nil, fmt.Errorf("failed to insert metadata: %v", err)
+		}
+	}
+
+	// Commit transaktionen
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Successfully updated metadata for file with ID: %s", fileID)
+
+	// Hämta den uppdaterade filen för att returnera
+	return (&queryResolver{r.Resolver}).GetFile(ctx, fileID)
+}
+
+// DeleteMetadata är resolvern för deleteMetadata-mutation
+// Tar bort specifik metadata från en fil baserat på nycklar
+func (r *mutationResolver) DeleteMetadata(ctx context.Context, fileID string, keys []string) (*model.File, error) {
+	logAction(fmt.Sprintf("Attempting to delete metadata for file with ID: %s", fileID))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Kontrollera att filen finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM files WHERE id = ?)", fileID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if file exists: %v", err)
+		return nil, fmt.Errorf("failed to check if file exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("No file found with ID: %s", fileID)
+		return nil, fmt.Errorf("file not found")
+	}
+
+	// Starta en transaktion
+	tx, err := r.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		return nil, fmt.Errorf("failed to start transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Ta bort metadata baserat på nycklar
+	for _, key := range keys {
+		_, err := tx.Exec("DELETE FROM metadata WHERE file_id = ? AND key = ?", fileID, key)
+		if err != nil {
+			log.Printf("Error deleting metadata with key %s: %v", key, err)
+			return nil, fmt.Errorf("failed to delete metadata: %v", err)
+		}
+	}
+
+	// Commit transaktionen
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Successfully deleted metadata for file with ID: %s", fileID)
+
+	// Hämta den uppdaterade filen för att returnera
+	return (&queryResolver{r.Resolver}).GetFile(ctx, fileID)
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {

@@ -24,6 +24,8 @@ type Query {
 type Mutation {
   saveFile(input: FileInput!): File!
   deleteFile(id: ID!): Boolean!
+  updateMetadata(fileId: ID!, metadataInput: [MetadataInput!]!): File!
+  deleteMetadata(fileId: ID!, keys: [String!]!): File!
 }
 
 type File {
@@ -53,4 +55,3 @@ input MetadataInput {
   key: String!
   value: String!
 }
-
