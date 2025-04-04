@@ -397,31 +397,36 @@ onMounted(() => {
     
     <!-- Sidopanel-vy (standardvy) -->
     <div v-else-if="viewMode === 'sidepanel'" class="file-list-sidepanel">
-      <div class="files-container">
-        <div 
-          v-for="file in files" 
-          :key="file.id" 
-          class="file-card"
-          :class="{ 'selected': selectedFile && selectedFile.id === file.id }"
-          @click="openSidepanel(file)"
-        >
-          <h3 class="file-name">{{ file.name }}</h3>
-          <div class="file-info-summary">
-            <div class="file-size">{{ formatFileSize(file.size) }}</div>
-            <div class="file-type">{{ file.contentType }}</div>
-          </div>
-          <div class="file-metadata-summary">
-            <span class="metadata-count">{{ file.metadata ? file.metadata.length : 0 }} metadatafält</span>
+      <!-- Huvudinnehåll -->
+      <div class="main-content" :class="{ 'sidebar-open': sidepanelOpen }">
+        <div class="files-container">
+          <div 
+            v-for="file in files" 
+            :key="file.id" 
+            class="file-card"
+            :class="{ 'selected': selectedFile && selectedFile.id === file.id }"
+            @click="openSidepanel(file)"
+          >
+            <h3 class="file-name">{{ file.name }}</h3>
+            <div class="file-info-summary">
+              <div class="file-size">{{ formatFileSize(file.size) }}</div>
+              <div class="file-type">{{ file.contentType }}</div>
+            </div>
+            <div class="file-metadata-summary">
+              <span class="metadata-count">{{ file.metadata ? file.metadata.length : 0 }} metadatafält</span>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Sidopanelen -->
       <div class="detail-sidepanel" :class="{ 'open': sidepanelOpen }">
+        <div class="sidepanel-minimize-strip" @click="closeSidepanel" title="Minimera sidopanel">
+          <div class="minimize-icon">▶</div>
+        </div>
         <div v-if="selectedFile" class="sidepanel-content">
           <div class="sidepanel-header">
             <h2>{{ selectedFile.name }}</h2>
-            <button @click="closeSidepanel" class="close-btn" title="Stäng sidopanel">×</button>
           </div>
           
           <div class="file-details">
@@ -669,12 +674,21 @@ onMounted(() => {
 .file-list-sidepanel {
   display: flex;
   height: 100%;
-  overflow: hidden;
+  position: relative;
+}
+
+.main-content {
+  width: 100%;
+  transition: width 0.3s;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.main-content.sidebar-open {
+  width: 50%;
 }
 
 .files-container {
-  flex: 1;
-  overflow-y: auto;
   padding-right: 20px;
 }
 
@@ -718,33 +732,28 @@ onMounted(() => {
 }
 
 .detail-sidepanel {
-  width: 0;
   position: absolute;
   top: 0;
   right: 0;
   height: 100%;
+  width: 0;
   background-color: var(--background-color);
   border-left: 1px solid var(--border-color);
   overflow: hidden;
   transition: width 0.3s;
+  box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
   z-index: 10;
 }
 
 .detail-sidepanel.open {
   width: 50%;
-  box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
-}
-
-.sidepanel-content {
-  width: 100%;
-  height: 100%;
-  padding: 20px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
 }
 
 .sidepanel-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: var(--background-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -756,6 +765,45 @@ onMounted(() => {
 .sidepanel-header h2 {
   margin: 0;
   word-break: break-word;
+}
+
+.sidepanel-minimize-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 15px;
+  height: 100%;
+  background-color: var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  transition: background-color 0.2s;
+}
+
+.sidepanel-minimize-strip:hover {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.minimize-icon {
+  color: var(--text-color);
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.sidepanel-minimize-strip:hover .minimize-icon {
+  opacity: 1;
+}
+
+.sidepanel-content {
+  width: calc(100% - 15px); /* Justera för minimera-knappen */
+  margin-left: 15px; /* Justera för minimera-knappen */
+  height: 100%;
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .file-details {
@@ -948,175 +996,6 @@ onMounted(() => {
   width: 100%;
 }
 
-/* Expanderbar vy */
-.file-list-expandable {
-  height: 100%;
-  overflow-y: auto;
-}
-
-.metadata-summary {
-  cursor: pointer;
-  padding: 8px;
-  background-color: rgba(0, 0, 0, 0.02);
-  border-radius: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  transition: background-color 0.2s;
-}
-
-.metadata-summary:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.toggle-icon {
-  font-size: 0.8em;
-}
-
-.metadata-expanded {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background-color: rgba(0, 0, 0, 0.01);
-}
-
-.metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.metadata-grid-item {
-  border: 1px solid var(--border-color);
-  padding: 8px;
-  border-radius: 4px;
-  position: relative;
-  background-color: var(--background-color);
-}
-
-/* Modalfönster för metadata-redigering */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background-color: var(--background-color);
-  padding: 20px;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 800px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.modal-header h2 {
-  margin: 0;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.metadata-editor {
-  margin-bottom: 20px;
-}
-
-.metadata-field {
-  margin-bottom: 10px;
-}
-
-.metadata-inputs {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.input-group {
-  flex-grow: 1;
-}
-
-.input-group label {
-  display: block;
-  margin-bottom: 3px;
-  font-size: 0.8rem;
-}
-
-.input-group input {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background-color: var(--background-color);
-  color: var(--text-color);
-}
-
-.metadata-actions {
-  margin-top: 15px;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-color);
-}
-
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.file-table th, .file-table td {
-  border: 1px solid var(--table-border-color);
-  padding: 10px;
-}
-
-.file-table th {
-  background-color: var(--header-bg);
-  text-align: left;
-}
-
-.metadata-cell {
-  width: 30%;
-}
-
-.actions-cell {
-  width: 150px;
-}
-
-.action-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 /* Knappstilar */
 .download-btn, .edit-btn, .delete-file-btn {
   display: flex;
@@ -1184,35 +1063,5 @@ onMounted(() => {
 
 .delete-btn:hover {
   background-color: #c0392b;
-}
-
-/* Responsivitet */
-@media (max-width: 992px) {
-  .detail-sidepanel.open {
-    width: 70%;
-  }
-  
-  .metadata-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  .detail-sidepanel.open {
-    width: 100%;
-  }
-  
-  .metadata-cards {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  }
-  
-  .metadata-inputs {
-    flex-direction: column;
-  }
-  
-  .file-table th, .file-table td {
-    padding: 8px 5px;
-    font-size: 0.9rem;
-  }
 }
 </style>
