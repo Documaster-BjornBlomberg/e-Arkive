@@ -1,0 +1,2 @@
+detta prodjekt ska anvenda sig av Atomic design och när nya frontend element ska implementeras ska man anvenda redan implementerade delar först och endast vid behov så skapar man nya dellar.
+operativ systemet jag utveklar och testar på är windows 11 och den kör powershell i teminalen.

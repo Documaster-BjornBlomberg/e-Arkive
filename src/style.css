@@ -1,51 +1,233 @@
-/* Gemensam styling för uppladdnings- och listningssidor */
+:root {
+  --background-color: #ffffff;
+  --text-color: #000000;
+  --table-border-color: #dddddd;
+  --button-bg: #4CAF50;
+  --button-hover-bg: #45a049;
+  --button-text: white;
+  --header-bg: #f8f9fa;
+  --border-color: #e1e4e8;
+}
+
+[data-theme='dark'] {
+  --background-color: #121212;
+  --text-color: #e0e0e0;
+  --table-border-color: #333333;
+  --button-bg: #2c8630;
+  --button-hover-bg: #236b25;
+  --button-text: #e0e0e0;
+  --header-bg: #1e1e1e;
+  --border-color: #333333;
+}
+
 body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
   background-color: var(--background-color);
   color: var(--text-color);
   transition: background-color 0.3s, color 0.3s;
 }
 
-nav ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 1rem;
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
-nav ul li {
-  display: inline;
+button {
+  background-color: var(--button-bg);
+  color: var(--button-text);
+  border: none;
+  padding: 8px 16px;
+  margin: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
-nav ul li a {
-  text-decoration: none;
+button:hover {
+  background-color: var(--button-hover-bg);
+}
+
+input[type="file"], input[type="text"] {
+  padding: 8px;
+  margin: 5px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--background-color);
   color: var(--text-color);
-}
-
-nav ul li a:hover {
-  text-decoration: underline;
+  width: 100%;
+  max-width: 300px;
 }
 
 .file-table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 20px;
-}
-
-.file-table th, .file-table td {
   border: 1px solid var(--table-border-color);
-  padding: 8px;
+  padding: 12px 8px;
   text-align: left;
 }
 
 .file-table th {
-  background-color: #f4f4f4;
+  background-color: var(--header-bg);
   font-weight: bold;
 }
 
 .file-table tr:nth-child(even) {
-  background-color: #f9f9f9;
+  background-color: rgba(128, 128, 128, 0.05);
 }
 
 .file-table tr:hover {
-  background-color: #f1f1f1;
+  background-color: rgba(128, 128, 128, 0.1);
+}
+
+/* FileUpload.vue styles */
+.upload-container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.file-info {
+  background-color: rgba(128, 128, 128, 0.1);
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.metadata-section {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 15px;
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+.metadata-section h2 {
+  margin-top: 0;
+  margin-bottom: 5px;
+}
+
+.metadata-help {
+  color: #666;
+  margin-bottom: 15px;
+  font-size: 0.9em;
+}
+
+.metadata-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metadata-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.metadata-inputs {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+}
+
+.input-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.input-group label {
+  margin-bottom: 3px;
+  font-size: 0.9em;
+}
+
+input[type="text"] {
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+.metadata-actions {
+  margin-top: 10px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-btn {
+  background-color: #3498db;
+  color: white;
+}
+
+.add-btn:hover:not(:disabled) {
+  background-color: #2980b9;
+}
+
+.remove-btn {
+  background-color: #e74c3c;
+  color: white;
+  padding: 4px 8px;
+  font-size: 0.8em;
+}
+
+.remove-btn:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
+.upload-btn {
+  background-color: var(--button-bg);
+  color: var(--button-text);
+  padding: 10px 20px;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background-color: var(--button-hover-bg);
+}
+
+.reset-btn {
+  background-color: #7f8c8d;
+  color: white;
+}
+
+.reset-btn:hover:not(:disabled) {
+  background-color: #95a5a6;
+}
+
+.upload-status {
+  padding: 10px;
+  border-radius: 4px;
+  background-color: rgba(46, 204, 113, 0.1);
+  border-left: 4px solid #2ecc71;
+}
+
+.upload-status .error {
+  background-color: rgba(231, 76, 60, 0.1);
+  border-left-color: #e74c3c;
 }
