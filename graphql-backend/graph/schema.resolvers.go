@@ -21,6 +21,60 @@ func logAction(action string) {
 	log.Printf("[ACTION] %s", action)
 }
 
+// Hjälpfunktion för att hämta en nod med ID (tillgänglig för alla resolvers)
+func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
+	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
+
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	row := db.QueryRow(`
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
+		WHERE id = ?
+	`, id)
+
+	var node model.Node
+	var parentID sql.NullString
+	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		log.Printf("Node with ID %s not found", id)
+		return nil, fmt.Errorf("node not found")
+	} else if err != nil {
+		log.Printf("Error fetching node with ID %s: %v", id, err)
+		return nil, fmt.Errorf("failed to fetch node: %v", err)
+	}
+
+	if parentID.Valid {
+		parentIDStr := parentID.String
+		node.ParentID = &parentIDStr
+	}
+
+	// Hämta alla barn till denna nod
+	rows, err := db.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, node.ID)
+	if err != nil {
+		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
+		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
+	}
+	defer rows.Close()
+
+	children, err := scanNodeRows(rows)
+	if err != nil {
+		log.Printf("Error scanning child rows: %v", err)
+		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
+	}
+
+	node.Children = children
+	return &node, nil
+}
+
 // SaveFile är resolvern för saveFile-fältet
 // Hanterar uppladdning av nya filer och deras metadata till databasen
 func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) (*model.File, error) {
@@ -245,6 +299,219 @@ func (r *mutationResolver) DeleteMetadata(ctx context.Context, fileID string, ke
 	return (&queryResolver{r.Resolver}).GetFile(ctx, fileID)
 }
 
+// CreateNode är resolvern för createNode-mutation
+// Skapar en ny nod med ett valfritt parent ID
+func (r *mutationResolver) CreateNode(ctx context.Context, input model.NodeInput) (*model.Node, error) {
+	logAction(fmt.Sprintf("Attempting to create node with name: %s", input.Name))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Validera parent_id om det är angivet
+	if input.ParentID != nil {
+		var exists bool
+		err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", *input.ParentID).Scan(&exists)
+		if err != nil {
+			log.Printf("Error checking if parent node exists: %v", err)
+			return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+		}
+
+		if !exists {
+			log.Printf("Parent node with ID %s does not exist", *input.ParentID)
+			return nil, fmt.Errorf("parent node not found")
+		}
+	}
+
+	// Skapa den nya noden
+	now := time.Now().Format(time.RFC3339)
+	var result sql.Result
+	var err error
+
+	if input.ParentID != nil {
+		result, err = r.DB.Exec(
+			"INSERT INTO nodes (name, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+			input.Name, input.ParentID, now, now,
+		)
+	} else {
+		result, err = r.DB.Exec(
+			"INSERT INTO nodes (name, created_at, updated_at) VALUES (?, ?, ?)",
+			input.Name, now, now,
+		)
+	}
+
+	if err != nil {
+		log.Printf("Error creating node: %v", err)
+		return nil, fmt.Errorf("failed to create node: %v", err)
+	}
+
+	nodeID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Error retrieving last insert ID: %v", err)
+		return nil, fmt.Errorf("failed to retrieve node ID: %v", err)
+	}
+
+	log.Printf("Node created successfully with ID: %d", nodeID)
+
+	// Returnera den skapade noden
+	node := &model.Node{
+		ID:        fmt.Sprintf("%d", nodeID),
+		Name:      input.Name,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if input.ParentID != nil {
+		node.ParentID = input.ParentID
+	}
+
+	return node, nil
+}
+
+// UpdateNode är resolvern för updateNode-mutation
+// Uppdaterar en befintlig nod med nytt namn och/eller parent ID
+func (r *mutationResolver) UpdateNode(ctx context.Context, id string, input model.NodeUpdateInput) (*model.Node, error) {
+	logAction(fmt.Sprintf("Attempting to update node with ID: %s", id))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Kontrollera att noden finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if node exists: %v", err)
+		return nil, fmt.Errorf("failed to check if node exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("Node with ID %s does not exist", id)
+		return nil, fmt.Errorf("node not found")
+	}
+
+	// Om parentId är uppdaterat, kontrollera att den nya föräldern existerar
+	if input.ParentID != nil {
+		// Kontrollera om den nya föräldern finns
+		var parentExists bool
+		err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", *input.ParentID).Scan(&parentExists)
+		if err != nil {
+			log.Printf("Error checking if parent node exists: %v", err)
+			return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+		}
+
+		if !parentExists {
+			log.Printf("Parent node with ID %s does not exist", *input.ParentID)
+			return nil, fmt.Errorf("parent node not found")
+		}
+
+		// Kontrollera att den nya föräldern inte är en av barnens barn (cykeldetektion)
+		var isCycle bool
+		err = r.detectCycle(id, *input.ParentID, &isCycle)
+		if err != nil {
+			log.Printf("Error detecting cycle: %v", err)
+			return nil, fmt.Errorf("failed to validate hierarchy: %v", err)
+		}
+
+		if isCycle {
+			log.Printf("Cannot update node: would create a cycle in the hierarchy")
+			return nil, fmt.Errorf("cannot update node: would create a cycle in the hierarchy")
+		}
+	}
+
+	// Bygga update query dynamiskt baserat på vilka fält som ska uppdateras
+	query := "UPDATE nodes SET updated_at = datetime('now')"
+	args := []interface{}{}
+
+	if input.Name != nil {
+		query += ", name = ?"
+		args = append(args, *input.Name)
+	}
+
+	if input.ParentID != nil {
+		query += ", parent_id = ?"
+		args = append(args, *input.ParentID)
+	} else if input.ParentID == nil {
+		// Om parent_id explicit sätts till null
+		query += ", parent_id = NULL"
+	}
+
+	query += " WHERE id = ?"
+	args = append(args, id)
+
+	// Utför uppdateringen
+	_, err = r.DB.Exec(query, args...)
+	if err != nil {
+		log.Printf("Error updating node: %v", err)
+		return nil, fmt.Errorf("failed to update node: %v", err)
+	}
+
+	log.Printf("Node with ID %s updated successfully", id)
+
+	// Hämta den uppdaterade noden från databasen
+	return getNodeById(ctx, r.DB, id)
+}
+
+// DeleteNode är resolvern för deleteNode-mutation
+// Tar bort en nod om den inte har några barn
+func (r *mutationResolver) DeleteNode(ctx context.Context, id string) (bool, error) {
+	logAction(fmt.Sprintf("Attempting to delete node with ID: %s", id))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return false, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Kontrollera att noden finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if node exists: %v", err)
+		return false, fmt.Errorf("failed to check if node exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("Node with ID %s does not exist", id)
+		return false, fmt.Errorf("node not found")
+	}
+
+	// Kontrollera om noden har barn
+	var hasChildren bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ?)", id).Scan(&hasChildren)
+	if err != nil {
+		log.Printf("Error checking if node has children: %v", err)
+		return false, fmt.Errorf("failed to check if node has children: %v", err)
+	}
+
+	if hasChildren {
+		log.Printf("Cannot delete node with ID %s: has children nodes", id)
+		return false, fmt.Errorf("cannot delete node: has children nodes")
+	}
+
+	// Ta bort noden
+	result, err := r.DB.Exec("DELETE FROM nodes WHERE id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting node with ID %s: %v", id, err)
+		return false, fmt.Errorf("failed to delete node: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		return false, fmt.Errorf("error confirming deletion: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		log.Printf("No rows deleted for node with ID %s", id)
+		return false, nil
+	}
+
+	log.Printf("Node with ID %s deleted successfully", id)
+	return true, nil
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -414,6 +681,70 @@ func (r *queryResolver) DownloadFile(ctx context.Context, id string) (*model.Fil
 	return &file, nil
 }
 
+// GetRootNodes hämtar alla noder som inte har någon förälder (top-level noder)
+func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error) {
+	logAction("Fetching root nodes")
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	rows, err := r.DB.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id IS NULL
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		log.Printf("Error fetching root nodes: %v", err)
+		return nil, fmt.Errorf("failed to fetch root nodes: %v", err)
+	}
+	defer rows.Close()
+
+	return scanNodeRows(rows)
+}
+
+// GetNodeById implementerar Query.getNodeById
+func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
+	return getNodeById(ctx, r.DB, id)
+}
+
+// GetChildNodes hämtar alla noder som har ett specifikt förälder-ID
+func (r *queryResolver) GetChildNodes(ctx context.Context, parentID string) ([]*model.Node, error) {
+	logAction(fmt.Sprintf("Fetching child nodes for parent ID: %s", parentID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	// Kontrollera att föräldern finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", parentID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if parent node exists: %v", err)
+		return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("Parent node with ID %s does not exist", parentID)
+		return nil, fmt.Errorf("parent node not found")
+	}
+
+	rows, err := r.DB.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, parentID)
+	if err != nil {
+		log.Printf("Error fetching child nodes: %v", err)
+		return nil, fmt.Errorf("failed to fetch child nodes: %v", err)
+	}
+	defer rows.Close()
+
+	return scanNodeRows(rows)
+}
+
 // Hello implementerar Query.hello
 func (r *queryResolver) Hello(ctx context.Context) (string, error) {
 	return "Hello from GraphQL!", nil
@@ -427,13 +758,113 @@ func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, 
 	}, nil
 }
 
+// Children hanterar laddning av barnnoder för en nod
+func (r *nodeResolver) Children(ctx context.Context, obj *model.Node) ([]*model.Node, error) {
+	logAction(fmt.Sprintf("Resolving children for node with ID: %s", obj.ID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	rows, err := r.DB.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, obj.ID)
+	if err != nil {
+		log.Printf("Error fetching children for node ID %s: %v", obj.ID, err)
+		return nil, fmt.Errorf("failed to fetch children: %v", err)
+	}
+	defer rows.Close()
+
+	return scanNodeRows(rows)
+}
+
+// Parent hanterar laddning av föräldernode för en nod
+func (r *nodeResolver) Parent(ctx context.Context, obj *model.Node) (*model.Node, error) {
+	if obj.ParentID == nil {
+		return nil, nil // Ingen förälder
+	}
+
+	logAction(fmt.Sprintf("Resolving parent for node with ID: %s", obj.ID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	return getNodeById(ctx, r.DB, *obj.ParentID)
+}
+
+// Hjälpfunktion för att scanna rader från SQL-fråga till Node-objekt
+func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
+	var nodes []*model.Node
+	for rows.Next() {
+		var node model.Node
+		var parentID sql.NullString
+
+		if err := rows.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt); err != nil {
+			log.Printf("Error scanning node row: %v", err)
+			return nil, fmt.Errorf("failed to scan node row: %v", err)
+		}
+
+		if parentID.Valid {
+			parentIDStr := parentID.String
+			node.ParentID = &parentIDStr
+		}
+
+		nodes = append(nodes, &node)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over node rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over node rows: %v", err)
+	}
+
+	return nodes, nil
+}
+
+// Hjälpfunktion för att detektera cykler i nodträdet
+func (r *mutationResolver) detectCycle(nodeID, potentialParentID string, isCycle *bool) error {
+	// Om potentiell förälder är samma som noden själv, har vi en cykel
+	if nodeID == potentialParentID {
+		*isCycle = true
+		return nil
+	}
+
+	// Hämta alla barnnoder till den aktuella noden
+	rows, err := r.DB.Query("SELECT id FROM nodes WHERE parent_id = ?", nodeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	// Kontrollera rekursivt för alla barn
+	var childID string
+	for rows.Next() {
+		if err := rows.Scan(&childID); err != nil {
+			return err
+		}
+
+		if *isCycle {
+			return nil // Avbryt om vi redan har hittat en cykel
+		}
+
+		// Rekursivt anrop för att kontrollera barnet och dess barn
+		if err := r.detectCycle(childID, potentialParentID, isCycle); err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
+}
+
+// GetNodeByID är anslutningen mot genererad kod för getNodeById
+func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
+	return r.GetNodeById(ctx, id)
+}
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type todoResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+type nodeResolver struct{ *Resolver }

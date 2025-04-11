@@ -14,10 +14,23 @@ type User {
   name: String!
 }
 
+type Node {
+  id: ID!
+  name: String!
+  parentId: ID
+  createdAt: String!
+  updatedAt: String!
+  children: [Node!]
+  parent: Node
+}
+
 type Query {
   getFiles: [File!]!
   getFile(id: ID!): File
   downloadFile(id: ID!): File
+  getRootNodes: [Node!]!
+  getNodeById(id: ID!): Node
+  getChildNodes(parentId: ID!): [Node!]!
   hello: String!
 }
 
@@ -26,6 +39,9 @@ type Mutation {
   deleteFile(id: ID!): Boolean!
   updateMetadata(fileId: ID!, metadataInput: [MetadataInput!]!): File!
   deleteMetadata(fileId: ID!, keys: [String!]!): File!
+  createNode(input: NodeInput!): Node!
+  updateNode(id: ID!, input: NodeUpdateInput!): Node!
+  deleteNode(id: ID!): Boolean!
 }
 
 type File {
@@ -54,4 +70,14 @@ input FileInput {
 input MetadataInput {
   key: String!
   value: String!
+}
+
+input NodeInput {
+  name: String!
+  parentId: ID
+}
+
+input NodeUpdateInput {
+  name: String
+  parentId: ID
 }

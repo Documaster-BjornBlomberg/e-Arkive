@@ -1,2 +1,34 @@
+frontend:
 detta prodjekt ska anvenda sig av Atomic design och när nya frontend element ska implementeras ska man anvenda redan implementerade delar först och endast vid behov så skapar man nya dellar.
+
+backend:
+implementera nya API frågor
+Här är en kort guide för hur du implementerar en delad hjälpfunktion mellan resolvers i en GraphQL-backend med gqlgen:
+## Hur man delar funktioner mellan resolvers i GraphQL
+När du behöver använda samma funktionalitet i flera resolvers (t.ex. både i Query och Mutation):
+1. **Skapa en fristående hjälpfunktion** i schema.resolvers.go:
+   ```go
+   func helperFunction(ctx context.Context, db *sql.DB, id string) (*model.Result, error) {
+       // Implementera delad logik här
+       return result, nil
+   }
+   ```
+2. **Använd explicit databasanslutning** istället för resolver-instans i hjälpfunktionen.
+3. **Anropa hjälpfunktionen** från resolvers:
+   ```go
+   func (r *queryResolver) GetSomething(ctx context.Context, id string) (*model.Result, error) {
+       return helperFunction(ctx, r.DB, id)
+   }
+   
+   func (r *mutationResolver) UpdateSomething(ctx context.Context, id string) (*model.Result, error) {
+       // Kod för uppdatering
+       return helperFunction(ctx, r.DB, id)
+   }
+   ```
+4. **Undvik duplicerade metoder** - kontrollera att du inte definierar samma metoder som redan finns i resolver.go.
+Detta mönster löser typiska fel som "type x has no field or method y" och "method already declared" i GraphQL-resolvers.
+
+Envierment:
 operativ systemet jag utveklar och testar på är windows 11 och den kör powershell i teminalen.
+
+

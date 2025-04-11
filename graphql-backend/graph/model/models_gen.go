@@ -33,6 +33,26 @@ type MetadataInput struct {
 type Mutation struct {
 }
 
+type Node struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	ParentID  *string `json:"parentId,omitempty"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
+	Children  []*Node `json:"children,omitempty"`
+	Parent    *Node   `json:"parent,omitempty"`
+}
+
+type NodeInput struct {
+	Name     string  `json:"name"`
+	ParentID *string `json:"parentId,omitempty"`
+}
+
+type NodeUpdateInput struct {
+	Name     *string `json:"name,omitempty"`
+	ParentID *string `json:"parentId,omitempty"`
+}
+
 type Query struct {
 }
 
