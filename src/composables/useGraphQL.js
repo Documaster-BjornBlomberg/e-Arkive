@@ -128,12 +128,80 @@ export function useGraphQL() {
     return data?.saveFile;
   };
 
+  /**
+   * Fetch all root nodes from the backend (nodes with no parent)
+   * @returns {Promise<Array>} The root nodes
+   */
+  const getRootNodes = async () => {
+    const query = `
+      query {
+        getRootNodes {
+          id
+          name
+          parentId
+          createdAt
+          updatedAt
+        }
+      }
+    `;
+
+    const data = await executeQuery(query);
+    return data?.getRootNodes || [];
+  };
+
+  /**
+   * Fetch all children for a specific node
+   * @param {string} parentId - The ID of the parent node
+   * @returns {Promise<Array>} The child nodes
+   */
+  const getChildNodes = async (parentId) => {
+    const query = `
+      query GetChildNodes($parentId: ID!) {
+        getChildNodes(parentId: $parentId) {
+          id
+          name
+          parentId
+          createdAt
+          updatedAt
+        }
+      }
+    `;
+
+    const data = await executeQuery(query, { parentId });
+    return data?.getChildNodes || [];
+  };
+
+  /**
+   * Get a node by ID
+   * @param {string} id - The ID of the node
+   * @returns {Promise<Object>} The node
+   */
+  const getNodeById = async (id) => {
+    const query = `
+      query GetNodeById($id: ID!) {
+        getNodeById(id: $id) {
+          id
+          name
+          parentId
+          createdAt
+          updatedAt
+        }
+      }
+    `;
+
+    const data = await executeQuery(query, { id });
+    return data?.getNodeById;
+  };
+
   return {
     loading,
     error,
     executeQuery,
     getFiles,
     getFileById,
-    saveFile
+    saveFile,
+    getRootNodes,
+    getChildNodes,
+    getNodeById
   };
 }

@@ -21,32 +21,41 @@
         </div>
       </div>
 
-      <!-- Using the FileList organism to display files -->
-      <div class="main-content" :class="{ 'with-sidepanel': viewMode === 'sidepanel' && selectedFile }">
-        <FileList 
-          :files="files"
-          :isLoading="loading"
-          :viewMode="viewMode"
-          :selectedFileId="selectedFileId"
-          :expandedFileId="expandedFileId"
-          @select-file="selectFile"
-          @toggle-expand="toggleExpand"
+      <div class="content-container">
+        <!-- Folder Panel (Left side) -->
+        <FolderPanel
+          v-model="selectedFolderId"
+          @update:modelValue="handleFolderSelect"
+        />
+        
+        <!-- Main Content (Center) -->
+        <div class="main-content" :class="{ 'with-sidepanel': viewMode === 'sidepanel' && selectedFile }">
+          <!-- Using the FileList organism to display files -->
+          <FileList 
+            :files="files"
+            :isLoading="loading"
+            :viewMode="viewMode"
+            :selectedFileId="selectedFileId"
+            :expandedFileId="expandedFileId"
+            @select-file="selectFile"
+            @toggle-expand="toggleExpand"
+          />
+
+          <!-- Show error message if there's an error fetching files -->
+          <div v-if="error" class="error-message">
+            <p>Ett fel uppstod: {{ error }}</p>
+            <Button @click="fetchFiles">Försök igen</Button>
+          </div>
+        </div>
+
+        <!-- File detail view using the side panel (Right side) -->
+        <FileDetailSidepanel
+          v-if="viewMode === 'sidepanel'"
+          :file="selectedFile"
+          :isOpen="!!selectedFile"
+          @close="closeDetail"
         />
       </div>
-
-      <!-- Show error message if there's an error fetching files -->
-      <div v-if="error" class="error-message">
-        <p>Ett fel uppstod: {{ error }}</p>
-        <Button @click="fetchFiles">Försök igen</Button>
-      </div>
-
-      <!-- File detail view using the side panel -->
-      <FileDetailSidepanel
-        v-if="viewMode === 'sidepanel'"
-        :file="selectedFile"
-        :isOpen="!!selectedFile"
-        @close="closeDetail"
-      />
     </div>
   </MainLayout>
 </template>
@@ -57,16 +66,22 @@ import MainLayout from '../templates/MainLayout.vue';
 import Button from '../atoms/Button.vue';
 import FileList from '../organisms/FileList.vue';
 import FileDetailSidepanel from '../organisms/FileDetailSidepanel.vue';
+import FolderPanel from '../organisms/FolderPanel.vue';
 import { useGraphQL } from '../../composables/useGraphQL';
+import { useNodeHandling } from '../../composables/useNodeHandling';
 
 // Set up GraphQL client
 const { loading, error, getFiles, getFileById } = useGraphQL();
+
+// Setup node handling for folders
+const { isNodePanelOpen } = useNodeHandling();
 
 const viewMode = ref('sidepanel');
 const files = ref([]);
 const selectedFileId = ref(null);
 const expandedFileId = ref(null);
 const selectedFile = ref(null);
+const selectedFolderId = ref(null);
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'sidepanel' ? 'expandable' : 'sidepanel';
@@ -114,6 +129,14 @@ const toggleExpand = (fileId) => {
   }
 };
 
+// Handle folder selection
+const handleFolderSelect = (folderId) => {
+  console.log(`Folder selected: ${folderId}`);
+  selectedFolderId.value = folderId;
+  // In a real implementation, we might filter files by folder here
+  // For now, we're just logging the folder selection
+};
+
 // Watch for changes in the file list
 watch(files, (newFiles) => {
   // If we have files and one was selected before, try to reselect it
@@ -151,10 +174,17 @@ onMounted(() => {
   border-bottom: 1px solid var(--border-color);
 }
 
+.content-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
 .main-content {
   flex: 1;
   transition: width 0.3s ease;
-  width: 100%;
+  overflow-y: auto;
+  padding: 0 20px;
 }
 
 .main-content.with-sidepanel {
