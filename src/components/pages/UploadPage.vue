@@ -1,50 +1,31 @@
 <template>
   <MainLayout>
-    <div class="upload-container">
-      <h2>Ladda upp dokument</h2>
-      
-      <!-- Add file input section -->
-      <div class="file-selection">
-        <FileInput
-          id="document-upload"
-          label="Välj dokument att ladda upp"
-          @change="onFileChange"
-          :disabled="isUploading"
-        />
+    <div class="upload-page">
+      <div class="upload-container">
+        <h1>Ladda upp dokument</h1>
         
-        <!-- Show selected file info -->
-        <div v-if="file" class="file-info">
-          <strong>Vald fil:</strong> {{ file.name }} ({{ formatFileSize(file.size) }})
+        <FileUploadForm 
+          @upload="handleUpload"
+          :is-uploading="uploading"
+          :available-nodes="availableNodes"
+          :selected-node-id="selectedNodeId"
+          @node-change="handleNodeChange" />
+        
+        <div v-if="statusMessage" 
+             :class="['upload-status', { 'success': isSuccess, 'error': !isSuccess }]">
+          {{ statusMessage }}
         </div>
-      </div>
-      
-      <MetadataSection
-        :metadata="metadataList"
-        :disabled="isUploading"
-        @update:metadata="metadataList = $event"
-        @add-metadata="addMetadata"
-      />
-      
-      <div class="form-actions">
-        <Button
-          variant="primary"
-          :disabled="!file || isUploading"
-          @click="uploadFile"
-        >
-          {{ isUploading ? 'Laddar upp...' : 'Ladda upp dokument' }}
-        </Button>
-        <Button
-          variant="default"
-          :disabled="isUploading"
-          @click="resetForm"
-        >
-          Återställ
-        </Button>
-      </div>
-
-      <!-- Status message -->
-      <div v-if="uploadStatus.show" :class="['status-message', uploadStatus.success ? 'success' : 'error']">
-        {{ uploadStatus.message }}
+        
+        <div v-if="uploadedFile" class="upload-result">
+          <h3>Dokument uppladdad!</h3>
+          <div class="file-preview">
+            <FileCardMolecule :file="uploadedFile" />
+          </div>
+          <div class="upload-actions">
+            <Button icon="list" @click="navigateToList">Visa alla dokument</Button>
+            <Button primary icon="upload" @click="resetUpload">Ladda upp fler</Button>
+          </div>
+        </div>
       </div>
     </div>
   </MainLayout>
@@ -52,166 +33,137 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import MetadataSection from '../organisms/MetadataSection.vue';
-import Button from '../atoms/Button.vue';
+import { useRouter } from 'vue-router';
 import MainLayout from '../templates/MainLayout.vue';
-import FileInput from '../atoms/FileInput.vue';
+import FileUploadForm from '../organisms/FileUploadForm.vue';
+import Button from '../atoms/Button.vue';
+import FileCardMolecule from '../molecules/FileCardMolecule.vue';
 import { useGraphQL } from '../../composables/useGraphQL';
-import StatusMessage from '../atoms/StatusMessage.vue';
+import { useNodeHandling } from '../../composables/useNodeHandling';
 
-const file = ref(null);
-const metadataList = ref([{ key: '', value: '' }]);
-const isUploading = ref(false);
-const uploadStatus = ref({ show: false, success: false, message: '' });
+const { saveFile } = useGraphQL();
+// Updated to use the new function for fetching all nodes
+const { getAllNodesForUpload } = useNodeHandling(); 
 
-// Get GraphQL utility
-const { saveFile, loading, error } = useGraphQL();
+const router = useRouter();
+const uploading = ref(false);
+const uploadedFile = ref(null);
+const statusMessage = ref('');
+const isSuccess = ref(true);
+const availableNodes = ref([]);
+const selectedNodeId = ref('1'); // Default to root node
 
-// Handle file selection
-const onFileChange = (e) => {
-  file.value = e.target.files[0];
-  // Reset status message when selecting a new file
-  uploadStatus.value = { show: false, success: false, message: '' };
+// Navigate to the file list page
+const navigateToList = () => {
+  router.push('/');
 };
 
-const addMetadata = () => {
-  metadataList.value.push({ key: '', value: '' });
+// Reset the form for another upload
+const resetUpload = () => {
+  uploadedFile.value = null;
+  statusMessage.value = '';
 };
 
-const uploadFile = async () => {
-  if (!file.value) return;
-  
-  isUploading.value = true;
-  uploadStatus.value = { show: false, success: false, message: '' };
+// Handle node selection change
+const handleNodeChange = (nodeId) => {
+  selectedNodeId.value = nodeId;
+};
+
+// Handle file upload
+const handleUpload = async (fileData) => {
+  uploading.value = true;
+  statusMessage.value = 'Laddar upp dokument...';
+  isSuccess.value = true;
   
   try {
-    // Convert file to base64
-    const fileData = await readFileAsBase64(file.value);
-    
-    // Prepare payload - only include metadata entries that have both key and value
-    const validMetadata = metadataList.value.filter(m => m.key && m.value);
-    
-    const payload = {
-      name: file.value.name,
-      size: file.value.size,
-      contentType: file.value.type,
-      fileData: fileData,
-      metadata: validMetadata
-    };
-    
-    console.log("Uploading file:", payload.name);
-    
-    // Upload file using GraphQL mutation
-    const result = await saveFile(payload);
-    
-    if (result && result.id) {
-      console.log("File uploaded successfully with ID:", result.id);
-      uploadStatus.value = { 
-        show: true, 
-        success: true, 
-        message: `Filen "${result.name}" har laddats upp framgångsrikt.` 
-      };
-      resetForm();
-    } else {
-      throw new Error("Filuppladdning misslyckades: Inget svar från servern");
+    // Add the selected node ID to the upload data
+    if (selectedNodeId.value) {
+      fileData.nodeId = selectedNodeId.value;
     }
     
+    const result = await saveFile(fileData);
+    uploadedFile.value = result;
+    statusMessage.value = 'Dokumentet har laddats upp!';
   } catch (error) {
-    console.error("Error uploading file:", error);
-    uploadStatus.value = { 
-      show: true, 
-      success: false, 
-      message: `Filuppladdning misslyckades: ${error.message}` 
-    };
+    console.error('Upload error:', error);
+    statusMessage.value = `Fel vid uppladdning: ${error.message}`;
+    isSuccess.value = false;
   } finally {
-    isUploading.value = false;
+    uploading.value = false;
   }
 };
 
-const resetForm = () => {
-  file.value = null;
-  metadataList.value = [{ key: '', value: '' }];
-  
-  // Reset file input by clearing the value
-  const fileInput = document.getElementById('document-upload');
-  if (fileInput) fileInput.value = '';
+// Initialize available nodes for the dropdown using the recursive fetch
+const loadAvailableNodes = async () => {
+  try {
+    // Fetch all nodes recursively and format them for the dropdown
+    availableNodes.value = await getAllNodesForUpload(); 
+  } catch (error) {
+    console.error('Error loading all nodes for upload:', error);
+  }
 };
 
-// Helper function to read file as base64
-const readFileAsBase64 = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      // Remove data URL prefix (e.g., "data:application/pdf;base64,")
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = error => reject(error);
-  });
-};
-
-// Helper function to format file size
-const formatFileSize = (bytes) => {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-};
-
-onMounted(() => {
-  // Initialization logic here
+// Load nodes when component is mounted
+onMounted(async () => {
+  await loadAvailableNodes();
 });
 </script>
 
 <style scoped>
-.upload-container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
-  background-color: var(--background-color);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.upload-container h2 {
-  margin-top: 0;
-  color: var(--text-color);
-}
-
-.file-selection {
-  margin-bottom: 20px;
-}
-
-.file-info {
-  margin-top: 10px;
-  padding: 10px;
-  background-color: rgba(128, 128, 128, 0.1);
-  border-radius: 4px;
-  color: var(--text-color);
-}
-
-.form-actions {
+.upload-page {
   display: flex;
-  gap: 10px;
-  margin-top: 20px;
+  justify-content: center;
+  padding: 40px 20px;
+  max-width: 100%;
 }
 
-/* Add status message styling */
-.status-message {
+.upload-container {
+  width: 100%;
+  max-width: 800px;
+}
+
+h1 {
+  margin-bottom: 30px;
+  color: var(--text-color);
+}
+
+.upload-status {
   margin-top: 20px;
-  padding: 12px;
+  padding: 15px;
   border-radius: 4px;
+  font-weight: 500;
 }
 
-.status-message.success {
-  background-color: rgba(46, 204, 113, 0.1);
-  border-left: 4px solid #2ecc71;
-  color: #27ae60;
+.upload-status.success {
+  background-color: var(--success-background);
+  color: var(--success-color);
 }
 
-.status-message.error {
-  background-color: rgba(231, 76, 60, 0.1);
-  border-left: 4px solid #e74c3c;
-  color: #c0392b;
+.upload-status.error {
+  background-color: var(--error-background);
+  color: var(--error-color);
+}
+
+.upload-result {
+  margin-top: 30px;
+  padding: 20px;
+  background-color: var(--surface-color);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.upload-result h3 {
+  color: var(--text-color);
+  margin-bottom: 15px;
+}
+
+.file-preview {
+  margin: 15px 0;
+}
+
+.upload-actions {
+  display: flex;
+  gap: 15px;
+  margin-top: 20px;
 }
 </style>

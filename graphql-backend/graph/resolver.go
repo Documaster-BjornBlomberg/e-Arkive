@@ -28,6 +28,12 @@ func (r *Resolver) Node() NodeResolver {
 	return &nodeResolver{r}
 }
 
+// File returnerar implementationen av FileResolver
+// Detta används för att lösa "node" fält i File-typen
+func (r *Resolver) File() FileResolver {
+	return &fileResolver{r}
+}
+
 // Todo returnerar implementationen av TodoResolver
 // Detta är en del av exempel-implementationen och kan tas bort om det inte behövs
 func (r *Resolver) Todo() TodoResolver {
@@ -48,4 +54,10 @@ type Resolver struct {
 type NodeResolver interface {
 	Children(ctx context.Context, obj *model.Node) ([]*model.Node, error)
 	Parent(ctx context.Context, obj *model.Node) (*model.Node, error)
+	Files(ctx context.Context, obj *model.Node) ([]*model.File, error)
+}
+
+// FileResolver interface definition
+type FileResolver interface {
+	Node(ctx context.Context, obj *model.File) (*model.Node, error)
 }

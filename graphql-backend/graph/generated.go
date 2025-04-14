@@ -55,6 +55,8 @@ type ComplexityRoot struct {
 		ID          func(childComplexity int) int
 		Metadata    func(childComplexity int) int
 		Name        func(childComplexity int) int
+		Node        func(childComplexity int) int
+		NodeID      func(childComplexity int) int
 		Size        func(childComplexity int) int
 	}
 
@@ -68,6 +70,7 @@ type ComplexityRoot struct {
 		DeleteFile     func(childComplexity int, id string) int
 		DeleteMetadata func(childComplexity int, fileID string, keys []string) int
 		DeleteNode     func(childComplexity int, id string) int
+		MoveFile       func(childComplexity int, fileID string, nodeID string) int
 		SaveFile       func(childComplexity int, input model.FileInput) int
 		UpdateMetadata func(childComplexity int, fileID string, metadataInput []*model.MetadataInput) int
 		UpdateNode     func(childComplexity int, id string, input model.NodeUpdateInput) int
@@ -76,6 +79,7 @@ type ComplexityRoot struct {
 	Node struct {
 		Children  func(childComplexity int) int
 		CreatedAt func(childComplexity int) int
+		Files     func(childComplexity int) int
 		ID        func(childComplexity int) int
 		Name      func(childComplexity int) int
 		Parent    func(childComplexity int) int
@@ -84,13 +88,14 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		DownloadFile  func(childComplexity int, id string) int
-		GetChildNodes func(childComplexity int, parentID string) int
-		GetFile       func(childComplexity int, id string) int
-		GetFiles      func(childComplexity int) int
-		GetNodeByID   func(childComplexity int, id string) int
-		GetRootNodes  func(childComplexity int) int
-		Hello         func(childComplexity int) int
+		DownloadFile     func(childComplexity int, id string) int
+		GetChildNodes    func(childComplexity int, parentID string) int
+		GetFile          func(childComplexity int, id string) int
+		GetFiles         func(childComplexity int) int
+		GetFilesByNodeID func(childComplexity int, nodeID string) int
+		GetNodeByID      func(childComplexity int, id string) int
+		GetRootNodes     func(childComplexity int) int
+		Hello            func(childComplexity int) int
 	}
 
 	Todo struct {
@@ -111,6 +116,7 @@ type MutationResolver interface {
 	DeleteFile(ctx context.Context, id string) (bool, error)
 	UpdateMetadata(ctx context.Context, fileID string, metadataInput []*model.MetadataInput) (*model.File, error)
 	DeleteMetadata(ctx context.Context, fileID string, keys []string) (*model.File, error)
+	MoveFile(ctx context.Context, fileID string, nodeID string) (*model.File, error)
 	CreateNode(ctx context.Context, input model.NodeInput) (*model.Node, error)
 	UpdateNode(ctx context.Context, id string, input model.NodeUpdateInput) (*model.Node, error)
 	DeleteNode(ctx context.Context, id string) (bool, error)
@@ -119,6 +125,7 @@ type QueryResolver interface {
 	GetFiles(ctx context.Context) ([]*model.File, error)
 	GetFile(ctx context.Context, id string) (*model.File, error)
 	DownloadFile(ctx context.Context, id string) (*model.File, error)
+	GetFilesByNodeID(ctx context.Context, nodeID string) ([]*model.File, error)
 	GetRootNodes(ctx context.Context) ([]*model.Node, error)
 	GetNodeByID(ctx context.Context, id string) (*model.Node, error)
 	GetChildNodes(ctx context.Context, parentID string) ([]*model.Node, error)
@@ -189,6 +196,20 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.File.Name(childComplexity), true
 
+	case "File.node":
+		if e.complexity.File.Node == nil {
+			break
+		}
+
+		return e.complexity.File.Node(childComplexity), true
+
+	case "File.nodeId":
+		if e.complexity.File.NodeID == nil {
+			break
+		}
+
+		return e.complexity.File.NodeID(childComplexity), true
+
 	case "File.size":
 		if e.complexity.File.Size == nil {
 			break
@@ -258,6 +279,18 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.Mutation.DeleteNode(childComplexity, args["id"].(string)), true
 
+	case "Mutation.moveFile":
+		if e.complexity.Mutation.MoveFile == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_moveFile_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.MoveFile(childComplexity, args["fileId"].(string), args["nodeId"].(string)), true
+
 	case "Mutation.saveFile":
 		if e.complexity.Mutation.SaveFile == nil {
 			break
@@ -307,6 +340,13 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Node.CreatedAt(childComplexity), true
+
+	case "Node.files":
+		if e.complexity.Node.Files == nil {
+			break
+		}
+
+		return e.complexity.Node.Files(childComplexity), true
 
 	case "Node.id":
 		if e.complexity.Node.ID == nil {
@@ -385,6 +425,18 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Query.GetFiles(childComplexity), true
+
+	case "Query.getFilesByNodeId":
+		if e.complexity.Query.GetFilesByNodeID == nil {
+			break
+		}
+
+		args, err := ec.field_Query_getFilesByNodeId_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.GetFilesByNodeID(childComplexity, args["nodeId"].(string)), true
 
 	case "Query.getNodeById":
 		if e.complexity.Query.GetNodeByID == nil {
@@ -692,6 +744,47 @@ func (ec *executionContext) field_Mutation_deleteNode_argsID(
 	return zeroVal, nil
 }
 
+func (ec *executionContext) field_Mutation_moveFile_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Mutation_moveFile_argsFileID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["fileId"] = arg0
+	arg1, err := ec.field_Mutation_moveFile_argsNodeID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["nodeId"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Mutation_moveFile_argsFileID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("fileId"))
+	if tmp, ok := rawArgs["fileId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Mutation_moveFile_argsNodeID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("nodeId"))
+	if tmp, ok := rawArgs["nodeId"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
 func (ec *executionContext) field_Mutation_saveFile_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -749,7 +842,7 @@ func (ec *executionContext) field_Mutation_updateMetadata_argsMetadataInput(
 ) ([]*model.MetadataInput, error) {
 	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("metadataInput"))
 	if tmp, ok := rawArgs["metadataInput"]; ok {
-		return ec.unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx, tmp)
+		return ec.unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, tmp)
 	}
 
 	var zeroVal []*model.MetadataInput
@@ -882,6 +975,29 @@ func (ec *executionContext) field_Query_getFile_argsID(
 ) (string, error) {
 	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
 	if tmp, ok := rawArgs["id"]; ok {
+		return ec.unmarshalNID2string(ctx, tmp)
+	}
+
+	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Query_getFilesByNodeId_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Query_getFilesByNodeId_argsNodeID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["nodeId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Query_getFilesByNodeId_argsNodeID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (string, error) {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("nodeId"))
+	if tmp, ok := rawArgs["nodeId"]; ok {
 		return ec.unmarshalNID2string(ctx, tmp)
 	}
 
@@ -1298,7 +1414,7 @@ func (ec *executionContext) _File_metadata(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.([]*model.Metadata)
 	fc.Result = res
-	return ec.marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataᚄ(ctx, field.Selections, res)
+	return ec.marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_File_metadata(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -1315,6 +1431,106 @@ func (ec *executionContext) fieldContext_File_metadata(_ context.Context, field 
 				return ec.fieldContext_Metadata_value(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Metadata", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _File_nodeId(ctx context.Context, field graphql.CollectedField, obj *model.File) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_File_nodeId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.NodeID, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*string)
+	fc.Result = res
+	return ec.marshalOID2ᚖstring(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_File_nodeId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "File",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _File_node(ctx context.Context, field graphql.CollectedField, obj *model.File) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_File_node(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Node, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(*model.Node)
+	fc.Result = res
+	return ec.marshalONode2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_File_node(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "File",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Node_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Node_name(ctx, field)
+			case "parentId":
+				return ec.fieldContext_Node_parentId(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Node_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Node_updatedAt(ctx, field)
+			case "children":
+				return ec.fieldContext_Node_children(ctx, field)
+			case "parent":
+				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
 	}
 	return fc, nil
@@ -1461,6 +1677,10 @@ func (ec *executionContext) fieldContext_Mutation_saveFile(ctx context.Context, 
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -1587,6 +1807,10 @@ func (ec *executionContext) fieldContext_Mutation_updateMetadata(ctx context.Con
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -1658,6 +1882,10 @@ func (ec *executionContext) fieldContext_Mutation_deleteMetadata(ctx context.Con
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -1670,6 +1898,81 @@ func (ec *executionContext) fieldContext_Mutation_deleteMetadata(ctx context.Con
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteMetadata_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_moveFile(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Mutation_moveFile(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Mutation().MoveFile(rctx, fc.Args["fileId"].(string), fc.Args["nodeId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*model.File)
+	fc.Result = res
+	return ec.marshalNFile2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Mutation_moveFile(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_File_id(ctx, field)
+			case "name":
+				return ec.fieldContext_File_name(ctx, field)
+			case "size":
+				return ec.fieldContext_File_size(ctx, field)
+			case "contentType":
+				return ec.fieldContext_File_contentType(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_File_createdAt(ctx, field)
+			case "fileData":
+				return ec.fieldContext_File_fileData(ctx, field)
+			case "metadata":
+				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_moveFile_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -1729,6 +2032,8 @@ func (ec *executionContext) fieldContext_Mutation_createNode(ctx context.Context
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -1800,6 +2105,8 @@ func (ec *executionContext) fieldContext_Mutation_updateNode(ctx context.Context
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -2115,7 +2422,7 @@ func (ec *executionContext) _Node_children(ctx context.Context, field graphql.Co
 	}
 	res := resTmp.([]*model.Node)
 	fc.Result = res
-	return ec.marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNodeᚄ(ctx, field.Selections, res)
+	return ec.marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Node_children(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2140,6 +2447,8 @@ func (ec *executionContext) fieldContext_Node_children(_ context.Context, field 
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -2197,8 +2506,71 @@ func (ec *executionContext) fieldContext_Node_parent(_ context.Context, field gr
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Node_files(ctx context.Context, field graphql.CollectedField, obj *model.Node) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Node_files(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Files, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.([]*model.File)
+	fc.Result = res
+	return ec.marshalOFile2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Node_files(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Node",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_File_id(ctx, field)
+			case "name":
+				return ec.fieldContext_File_name(ctx, field)
+			case "size":
+				return ec.fieldContext_File_size(ctx, field)
+			case "contentType":
+				return ec.fieldContext_File_contentType(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_File_createdAt(ctx, field)
+			case "fileData":
+				return ec.fieldContext_File_fileData(ctx, field)
+			case "metadata":
+				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
 	}
 	return fc, nil
@@ -2257,6 +2629,10 @@ func (ec *executionContext) fieldContext_Query_getFiles(_ context.Context, field
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -2314,6 +2690,10 @@ func (ec *executionContext) fieldContext_Query_getFile(ctx context.Context, fiel
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -2382,6 +2762,10 @@ func (ec *executionContext) fieldContext_Query_downloadFile(ctx context.Context,
 				return ec.fieldContext_File_fileData(ctx, field)
 			case "metadata":
 				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
 		},
@@ -2394,6 +2778,81 @@ func (ec *executionContext) fieldContext_Query_downloadFile(ctx context.Context,
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_downloadFile_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_getFilesByNodeId(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Query_getFilesByNodeId(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Query().GetFilesByNodeID(rctx, fc.Args["nodeId"].(string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.([]*model.File)
+	fc.Result = res
+	return ec.marshalNFile2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFileᚄ(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Query_getFilesByNodeId(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_File_id(ctx, field)
+			case "name":
+				return ec.fieldContext_File_name(ctx, field)
+			case "size":
+				return ec.fieldContext_File_size(ctx, field)
+			case "contentType":
+				return ec.fieldContext_File_contentType(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_File_createdAt(ctx, field)
+			case "fileData":
+				return ec.fieldContext_File_fileData(ctx, field)
+			case "metadata":
+				return ec.fieldContext_File_metadata(ctx, field)
+			case "nodeId":
+				return ec.fieldContext_File_nodeId(ctx, field)
+			case "node":
+				return ec.fieldContext_File_node(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type File", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_getFilesByNodeId_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2453,6 +2912,8 @@ func (ec *executionContext) fieldContext_Query_getRootNodes(_ context.Context, f
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -2510,6 +2971,8 @@ func (ec *executionContext) fieldContext_Query_getNodeById(ctx context.Context, 
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -2581,6 +3044,8 @@ func (ec *executionContext) fieldContext_Query_getChildNodes(ctx context.Context
 				return ec.fieldContext_Node_children(ctx, field)
 			case "parent":
 				return ec.fieldContext_Node_parent(ctx, field)
+			case "files":
+				return ec.fieldContext_Node_files(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Node", field.Name)
 		},
@@ -5002,7 +5467,7 @@ func (ec *executionContext) unmarshalInputFileInput(ctx context.Context, obj any
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"name", "size", "contentType", "fileData", "metadata"}
+	fieldsInOrder := [...]string{"name", "size", "contentType", "fileData", "metadata", "nodeId"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -5039,11 +5504,18 @@ func (ec *executionContext) unmarshalInputFileInput(ctx context.Context, obj any
 			it.FileData = data
 		case "metadata":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("metadata"))
-			data, err := ec.unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx, v)
+			data, err := ec.unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, v)
 			if err != nil {
 				return it, err
 			}
 			it.Metadata = data
+		case "nodeId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("nodeId"))
+			data, err := ec.unmarshalOID2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.NodeID = data
 		}
 	}
 
@@ -5200,6 +5672,10 @@ func (ec *executionContext) _File(ctx context.Context, sel ast.SelectionSet, obj
 			out.Values[i] = ec._File_fileData(ctx, field, obj)
 		case "metadata":
 			out.Values[i] = ec._File_metadata(ctx, field, obj)
+		case "nodeId":
+			out.Values[i] = ec._File_nodeId(ctx, field, obj)
+		case "node":
+			out.Values[i] = ec._File_node(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -5314,6 +5790,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "moveFile":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_moveFile(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "createNode":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_createNode(ctx, field)
@@ -5395,6 +5878,8 @@ func (ec *executionContext) _Node(ctx context.Context, sel ast.SelectionSet, obj
 			out.Values[i] = ec._Node_children(ctx, field, obj)
 		case "parent":
 			out.Values[i] = ec._Node_parent(ctx, field, obj)
+		case "files":
+			out.Values[i] = ec._Node_files(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -5488,6 +5973,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_downloadFile(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "getFilesByNodeId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_getFilesByNodeId(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
 				return res
 			}
 
@@ -6185,34 +6692,19 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	return res
 }
 
-func (ec *executionContext) marshalNMetadata2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx context.Context, sel ast.SelectionSet, v *model.Metadata) graphql.Marshaler {
-	if v == nil {
-		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
-		}
-		return graphql.Null
-	}
-	return ec._Metadata(ctx, sel, v)
-}
-
-func (ec *executionContext) unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx context.Context, v any) ([]*model.MetadataInput, error) {
+func (ec *executionContext) unmarshalNMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx context.Context, v any) ([]*model.MetadataInput, error) {
 	var vSlice []any
 	vSlice = graphql.CoerceList(v)
 	var err error
 	res := make([]*model.MetadataInput, len(vSlice))
 	for i := range vSlice {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
-		res[i], err = ec.unmarshalNMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, vSlice[i])
+		res[i], err = ec.unmarshalOMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, vSlice[i])
 		if err != nil {
 			return nil, err
 		}
 	}
 	return res, nil
-}
-
-func (ec *executionContext) unmarshalNMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx context.Context, v any) (*model.MetadataInput, error) {
-	res, err := ec.unmarshalInputMetadataInput(ctx, v)
-	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalNNode2graphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx context.Context, sel ast.SelectionSet, v model.Node) graphql.Marshaler {
@@ -6619,6 +7111,47 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	return res
 }
 
+func (ec *executionContext) marshalOFile2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx context.Context, sel ast.SelectionSet, v []*model.File) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalOFile2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	return ret
+}
+
 func (ec *executionContext) marshalOFile2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐFile(ctx context.Context, sel ast.SelectionSet, v *model.File) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -6642,7 +7175,7 @@ func (ec *executionContext) marshalOID2ᚖstring(ctx context.Context, sel ast.Se
 	return res
 }
 
-func (ec *executionContext) marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Metadata) graphql.Marshaler {
+func (ec *executionContext) marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx context.Context, sel ast.SelectionSet, v []*model.Metadata) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -6669,7 +7202,7 @@ func (ec *executionContext) marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋm
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNMetadata2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx, sel, v[i])
+			ret[i] = ec.marshalOMetadata2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -6680,16 +7213,17 @@ func (ec *executionContext) marshalOMetadata2ᚕᚖgraphqlᚑbackendᚋgraphᚋm
 	}
 	wg.Wait()
 
-	for _, e := range ret {
-		if e == graphql.Null {
-			return graphql.Null
-		}
-	}
-
 	return ret
 }
 
-func (ec *executionContext) unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInputᚄ(ctx context.Context, v any) ([]*model.MetadataInput, error) {
+func (ec *executionContext) marshalOMetadata2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadata(ctx context.Context, sel ast.SelectionSet, v *model.Metadata) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Metadata(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx context.Context, v any) ([]*model.MetadataInput, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -6699,7 +7233,7 @@ func (ec *executionContext) unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgr
 	res := make([]*model.MetadataInput, len(vSlice))
 	for i := range vSlice {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
-		res[i], err = ec.unmarshalNMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, vSlice[i])
+		res[i], err = ec.unmarshalOMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx, vSlice[i])
 		if err != nil {
 			return nil, err
 		}
@@ -6707,7 +7241,15 @@ func (ec *executionContext) unmarshalOMetadataInput2ᚕᚖgraphqlᚑbackendᚋgr
 	return res, nil
 }
 
-func (ec *executionContext) marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNodeᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Node) graphql.Marshaler {
+func (ec *executionContext) unmarshalOMetadataInput2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐMetadataInput(ctx context.Context, v any) (*model.MetadataInput, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := ec.unmarshalInputMetadataInput(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx context.Context, sel ast.SelectionSet, v []*model.Node) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
@@ -6734,7 +7276,7 @@ func (ec *executionContext) marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodel
 			if !isLen1 {
 				defer wg.Done()
 			}
-			ret[i] = ec.marshalNNode2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx, sel, v[i])
+			ret[i] = ec.marshalONode2ᚖgraphqlᚑbackendᚋgraphᚋmodelᚐNode(ctx, sel, v[i])
 		}
 		if isLen1 {
 			f(i)
@@ -6744,12 +7286,6 @@ func (ec *executionContext) marshalONode2ᚕᚖgraphqlᚑbackendᚋgraphᚋmodel
 
 	}
 	wg.Wait()
-
-	for _, e := range ret {
-		if e == graphql.Null {
-			return graphql.Null
-		}
-	}
 
 	return ret
 }

@@ -20,14 +20,16 @@ type Node {
   parentId: ID
   createdAt: String!
   updatedAt: String!
-  children: [Node!]
+  children: [Node]
   parent: Node
+  files: [File]
 }
 
 type Query {
   getFiles: [File!]!
   getFile(id: ID!): File
   downloadFile(id: ID!): File
+  getFilesByNodeId(nodeId: ID!): [File!]!
   getRootNodes: [Node!]!
   getNodeById(id: ID!): Node
   getChildNodes(parentId: ID!): [Node!]!
@@ -37,8 +39,9 @@ type Query {
 type Mutation {
   saveFile(input: FileInput!): File!
   deleteFile(id: ID!): Boolean!
-  updateMetadata(fileId: ID!, metadataInput: [MetadataInput!]!): File!
+  updateMetadata(fileId: ID!, metadataInput: [MetadataInput]!): File!
   deleteMetadata(fileId: ID!, keys: [String!]!): File!
+  moveFile(fileId: ID!, nodeId: ID!): File!
   createNode(input: NodeInput!): Node!
   updateNode(id: ID!, input: NodeUpdateInput!): Node!
   deleteNode(id: ID!): Boolean!
@@ -50,8 +53,10 @@ type File {
   size: Int!
   contentType: String!
   createdAt: String!
-  fileData: String  # Base64-encoded file data
-  metadata: [Metadata!]
+  fileData: String
+  metadata: [Metadata]
+  nodeId: ID
+  node: Node
 }
 
 type Metadata {
@@ -63,8 +68,9 @@ input FileInput {
   name: String!
   size: Int!
   contentType: String!
-  fileData: String!  # Base64-encoded file data
-  metadata: [MetadataInput!]
+  fileData: String!
+  metadata: [MetadataInput]
+  nodeId: ID
 }
 
 input MetadataInput {

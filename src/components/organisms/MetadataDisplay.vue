@@ -40,7 +40,7 @@
     <!-- Category View -->
     <div v-else-if="activeTabValue === 'categories'" class="metadata-category-view">
       <MetadataCategoryView 
-        :metadata="metadata" 
+        :metadata="filteredMetadata" 
         @delete-metadata="$emit('delete-metadata', $event)"
       />
     </div>
@@ -71,52 +71,51 @@ const props = defineProps({
 
 const emit = defineEmits(['update:activeTab', 'update:metadataSearch', 'delete-metadata']);
 
-const searchInput = ref(props.metadataSearch);
+// Local state
 const activeTabValue = ref(props.activeTab);
+const searchInput = ref(props.metadataSearch);
 
-// Update local values when props change
-watch(() => props.activeTab, (newVal) => {
-  activeTabValue.value = newVal;
-});
-
-watch(() => props.metadataSearch, (newVal) => {
-  searchInput.value = newVal;
-});
-
-// Lista av metadata-fliktabbar
+// Available tabs
 const metadataTabs = [
   { id: 'list', label: 'Lista' },
   { id: 'cards', label: 'Kort' },
   { id: 'categories', label: 'Kategorier' }
 ];
 
-// Filtrerad metadata baserad på sökning
+// Filter metadata based on search query
 const filteredMetadata = computed(() => {
-  if (!props.metadata) return [];
+  if (!searchInput.value.trim()) return props.metadata || [];
   
-  if (!searchInput.value.trim()) return props.metadata;
-  
-  const search = searchInput.value.toLowerCase();
-  return props.metadata.filter(meta => 
-    meta.key.toLowerCase().includes(search) || 
-    meta.value.toLowerCase().includes(search)
+  const query = searchInput.value.toLowerCase();
+  return (props.metadata || []).filter(meta => 
+    meta.key.toLowerCase().includes(query) || 
+    meta.value.toLowerCase().includes(query)
   );
+});
+
+// Watch for prop changes
+watch(() => props.activeTab, (newValue) => {
+  activeTabValue.value = newValue;
+});
+
+watch(() => props.metadataSearch, (newValue) => {
+  searchInput.value = newValue;
 });
 </script>
 
 <style scoped>
 .metadata-section {
-  margin-bottom: 20px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+  padding: 15px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--surface-color);
 }
 
 .section-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  align-items: center;
+  margin-bottom: 15px;
 }
 
 .section-header h3 {
@@ -124,15 +123,26 @@ const filteredMetadata = computed(() => {
 }
 
 .metadata-search {
-  padding: 5px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   width: 150px;
+  font-size: 0.9rem;
+  background-color: var(--input-background);
+  color: var(--text-color);
 }
 
 .metadata-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 20px;
+  margin-bottom: 15px;
+}
+
+.metadata-list-view, 
+.metadata-card-view, 
+.metadata-category-view {
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 5px;
 }
 </style>

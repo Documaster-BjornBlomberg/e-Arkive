@@ -14,7 +14,7 @@ defineProps({
     <h2>Selected File</h2>
     
     <div class="file-preview-content">
-      <FileIcon :type="file.type" />
+      <FileIcon :fileName="file.name" :fileType="file.type" />
       
       <div class="file-details">
         <p class="file-name">{{ file.name }}</p>

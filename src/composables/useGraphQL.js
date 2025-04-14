@@ -66,6 +66,7 @@ export function useGraphQL() {
           size
           contentType
           createdAt
+          nodeId
           metadata {
             key
             value
@@ -76,6 +77,33 @@ export function useGraphQL() {
 
     const data = await executeQuery(query);
     return data?.getFiles || [];
+  };
+
+  /**
+   * Fetch files for a specific node
+   * @param {string} nodeId - The ID of the node to fetch files for
+   * @returns {Promise<Array>} The files in the node
+   */
+  const getFilesByNodeId = async (nodeId) => {
+    const query = `
+      query GetFilesByNodeId($nodeId: ID!) {
+        getFilesByNodeId(nodeId: $nodeId) {
+          id
+          name
+          size
+          contentType
+          createdAt
+          nodeId
+          metadata {
+            key
+            value
+          }
+        }
+      }
+    `;
+
+    const data = await executeQuery(query, { nodeId });
+    return data?.getFilesByNodeId || [];
   };
 
   /**
@@ -90,6 +118,7 @@ export function useGraphQL() {
           size
           contentType
           createdAt
+          nodeId
           metadata {
             key
             value
@@ -116,6 +145,7 @@ export function useGraphQL() {
           size
           contentType
           createdAt
+          nodeId
           metadata {
             key
             value
@@ -126,6 +156,27 @@ export function useGraphQL() {
 
     const data = await executeQuery(mutation, { input: fileInput });
     return data?.saveFile;
+  };
+
+  /**
+   * Move a file to a different node
+   * @param {string} fileId - The ID of the file to move
+   * @param {string} nodeId - The ID of the destination node
+   * @returns {Promise<Object>} The updated file
+   */
+  const moveFile = async (fileId, nodeId) => {
+    const mutation = `
+      mutation MoveFile($fileId: ID!, $nodeId: ID!) {
+        moveFile(fileId: $fileId, nodeId: $nodeId) {
+          id
+          name
+          nodeId
+        }
+      }
+    `;
+
+    const data = await executeQuery(mutation, { fileId, nodeId });
+    return data?.moveFile;
   };
 
   /**
@@ -172,6 +223,28 @@ export function useGraphQL() {
   };
 
   /**
+   * Create a new node
+   * @param {Object} input - The node input data
+   * @returns {Promise<Object>} The created node
+   */
+  const createNode = async (input) => {
+    const mutation = `
+      mutation CreateNode($input: NodeInput!) {
+        createNode(input: $input) {
+          id
+          name
+          parentId
+          createdAt
+          updatedAt
+        }
+      }
+    `;
+
+    const data = await executeQuery(mutation, { input });
+    return data?.createNode;
+  };
+
+  /**
    * Get a node by ID
    * @param {string} id - The ID of the node
    * @returns {Promise<Object>} The node
@@ -185,6 +258,21 @@ export function useGraphQL() {
           parentId
           createdAt
           updatedAt
+          children {
+            id
+            name
+          }
+          files {
+            id
+            name
+            size
+            contentType
+            createdAt
+            metadata {
+              key
+              value
+            }
+          }
         }
       }
     `;
@@ -193,15 +281,59 @@ export function useGraphQL() {
     return data?.getNodeById;
   };
 
+  /**
+   * Update an existing node
+   * @param {string} id - The ID of the node to update
+   * @param {Object} input - The update input data
+   * @returns {Promise<Object>} The updated node
+   */
+  const updateNode = async (id, input) => {
+    const mutation = `
+      mutation UpdateNode($id: ID!, $input: NodeUpdateInput!) {
+        updateNode(id: $id, input: $input) {
+          id
+          name
+          parentId
+          createdAt
+          updatedAt
+        }
+      }
+    `;
+
+    const data = await executeQuery(mutation, { id, input });
+    return data?.updateNode;
+  };
+
+  /**
+   * Delete a node
+   * @param {string} id - The ID of the node to delete
+   * @returns {Promise<boolean>} Success status
+   */
+  const deleteNode = async (id) => {
+    const mutation = `
+      mutation DeleteNode($id: ID!) {
+        deleteNode(id: $id)
+      }
+    `;
+
+    const data = await executeQuery(mutation, { id });
+    return data?.deleteNode;
+  };
+
   return {
     loading,
     error,
     executeQuery,
     getFiles,
+    getFilesByNodeId,
     getFileById,
     saveFile,
+    moveFile,
     getRootNodes,
     getChildNodes,
-    getNodeById
+    getNodeById,
+    createNode,
+    updateNode,
+    deleteNode
   };
 }

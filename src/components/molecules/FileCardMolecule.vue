@@ -4,7 +4,10 @@
     :class="{ 'selected': isSelected }"
     @click="$emit('click')"
   >
-    <h3 class="file-name">{{ file.name }}</h3>
+    <div class="file-card-header">
+      <FileIcon :fileName="file.name" :fileType="file.contentType" />
+      <h3 class="file-name">{{ file.name }}</h3>
+    </div>
     <div class="file-info-summary">
       <div class="file-size">{{ formatFileSize(file.size) }}</div>
       <div class="file-type">{{ file.contentType }}</div>
@@ -17,6 +20,7 @@
 
 <script setup>
 import MetadataBadge from '../atoms/MetadataBadge.vue';
+import FileIcon from '../atoms/FileIcon.vue';
 import { computed } from 'vue';
 
 const props = defineProps({
@@ -65,10 +69,18 @@ const metadataCount = computed(() => {
   background-color: rgba(76, 175, 80, 0.05);
 }
 
+.file-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .file-name {
   margin: 0 0 10px 0;
   font-size: 1.1rem;
   word-break: break-word;
+  flex: 1;
 }
 
 .file-info-summary {

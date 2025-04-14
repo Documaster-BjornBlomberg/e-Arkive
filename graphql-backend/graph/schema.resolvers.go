@@ -16,65 +16,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// logAction loggar viktiga händelser i systemet
-func logAction(action string) {
-	log.Printf("[ACTION] %s", action)
-}
-
-// Hjälpfunktion för att hämta en nod med ID (tillgänglig för alla resolvers)
-func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
-	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
-
-	if db == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	row := db.QueryRow(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE id = ?
-	`, id)
-
-	var node model.Node
-	var parentID sql.NullString
-	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		log.Printf("Node with ID %s not found", id)
-		return nil, fmt.Errorf("node not found")
-	} else if err != nil {
-		log.Printf("Error fetching node with ID %s: %v", id, err)
-		return nil, fmt.Errorf("failed to fetch node: %v", err)
-	}
-
-	if parentID.Valid {
-		parentIDStr := parentID.String
-		node.ParentID = &parentIDStr
-	}
-
-	// Hämta alla barn till denna nod
-	rows, err := db.Query(`
-		SELECT id, name, parent_id, created_at, updated_at 
-		FROM nodes 
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, node.ID)
-	if err != nil {
-		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
-		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
-	}
-	defer rows.Close()
-
-	children, err := scanNodeRows(rows)
-	if err != nil {
-		log.Printf("Error scanning child rows: %v", err)
-		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
-	}
-
-	node.Children = children
-	return &node, nil
-}
-
 // SaveFile är resolvern för saveFile-fältet
 // Hanterar uppladdning av nya filer och deras metadata till databasen
 func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) (*model.File, error) {
@@ -94,10 +35,27 @@ func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) 
 		return nil, fmt.Errorf("invalid file data: %v", err)
 	}
 
+	// Default nodeId to 1 (root) if not specified
+	nodeID := "1"
+	if input.NodeID != nil && *input.NodeID != "" {
+		// Verify that the node exists
+		var exists bool
+		err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", *input.NodeID).Scan(&exists)
+		if err != nil {
+			log.Printf("Error checking if node exists: %v", err)
+			return nil, fmt.Errorf("failed to validate node: %v", err)
+		}
+		if !exists {
+			log.Printf("Node with ID %s does not exist", *input.NodeID)
+			return nil, fmt.Errorf("node not found")
+		}
+		nodeID = *input.NodeID
+	}
+
 	// Sparar filinformation och binär data i databasen
 	result, err := r.DB.Exec(
-		"INSERT INTO files (name, size, content_type, created_at, file_data) VALUES (?, ?, ?, datetime('now'), ?)",
-		input.Name, input.Size, input.ContentType, fileData,
+		"INSERT INTO files (name, size, content_type, created_at, file_data, node_id) VALUES (?, ?, ?, datetime('now'), ?, ?)",
+		input.Name, input.Size, input.ContentType, fileData, nodeID,
 	)
 	if err != nil {
 		log.Printf("Error saving file to database: %v", err)
@@ -135,6 +93,9 @@ func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) 
 		}
 	}
 
+	// Convert nodeID to string pointer
+	nodeIDStr := nodeID
+
 	return &model.File{
 		ID:          fmt.Sprintf("%d", fileID),
 		Name:        input.Name,
@@ -143,6 +104,7 @@ func (r *mutationResolver) SaveFile(ctx context.Context, input model.FileInput) 
 		CreatedAt:   time.Now().Format(time.RFC3339),
 		FileData:    &input.FileData, // Skickar tillbaka base64-kodad data
 		Metadata:    metadata,
+		NodeID:      &nodeIDStr,
 	}, nil
 }
 
@@ -297,6 +259,90 @@ func (r *mutationResolver) DeleteMetadata(ctx context.Context, fileID string, ke
 
 	// Hämta den uppdaterade filen för att returnera
 	return (&queryResolver{r.Resolver}).GetFile(ctx, fileID)
+}
+
+// MoveFile moves a file to a different node
+func (r *mutationResolver) MoveFile(ctx context.Context, fileID string, nodeID string) (*model.File, error) {
+	logAction(fmt.Sprintf("Moving file %s to node %s", fileID, nodeID))
+
+	// Verify the file exists
+	var fileExists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM files WHERE id = ?)", fileID).Scan(&fileExists)
+	if err != nil {
+		log.Printf("Error checking if file exists: %v", err)
+		return nil, fmt.Errorf("failed to verify file: %v", err)
+	}
+	if !fileExists {
+		log.Printf("File with ID %s does not exist", fileID)
+		return nil, fmt.Errorf("file not found")
+	}
+
+	// Verify the node exists
+	var nodeExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&nodeExists)
+	if err != nil {
+		log.Printf("Error checking if node exists: %v", err)
+		return nil, fmt.Errorf("failed to verify node: %v", err)
+	}
+	if !nodeExists {
+		log.Printf("Node with ID %s does not exist", nodeID)
+		return nil, fmt.Errorf("node not found")
+	}
+
+	// Update the file's node_id
+	_, err = r.DB.Exec("UPDATE files SET node_id = ? WHERE id = ?", nodeID, fileID)
+	if err != nil {
+		log.Printf("Error updating file node_id: %v", err)
+		return nil, fmt.Errorf("failed to update file: %v", err)
+	}
+
+	// Get the updated file with all necessary information
+	var file model.File
+	var createdAt string
+
+	err = r.DB.QueryRow(`
+		SELECT id, name, size, content_type, created_at
+		FROM files WHERE id = ?`, fileID).Scan(
+		&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt)
+
+	if err != nil {
+		log.Printf("Error fetching updated file data: %v", err)
+		return nil, fmt.Errorf("file updated but failed to retrieve updated data: %v", err)
+	}
+
+	file.CreatedAt = createdAt
+	file.NodeID = &nodeID
+
+	// Fetch metadata for the file
+	metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", fileID)
+	if err != nil {
+		log.Printf("Error fetching metadata for file ID %s: %v", fileID, err)
+		return nil, fmt.Errorf("failed to fetch metadata: %v", err)
+	}
+	defer metaRows.Close()
+
+	var metadata []*model.Metadata
+	for metaRows.Next() {
+		var meta model.Metadata
+		if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
+			log.Printf("Error scanning metadata row: %v", err)
+			return nil, fmt.Errorf("failed to scan metadata row: %v", err)
+		}
+		metadata = append(metadata, &meta)
+	}
+	file.Metadata = metadata
+
+	// Fetch the node data so the file has a reference to its node
+	node, err := getNodeById(ctx, r.DB, nodeID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch node data for the file: %v", err)
+		// Continue without the node data as it's not critical
+	} else {
+		file.Node = node
+	}
+
+	log.Printf("Successfully moved file ID %s to node ID %s", fileID, nodeID)
+	return &file, nil
 }
 
 // CreateNode är resolvern för createNode-mutation
@@ -518,7 +564,7 @@ func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
 	logAction("Fetching all files from the database")
 
 	// Hämtar alla filer från databasen
-	rows, err := r.DB.Query("SELECT id, name, size, content_type, created_at, file_data FROM files")
+	rows, err := r.DB.Query("SELECT id, name, size, content_type, created_at, file_data, node_id FROM files")
 	if err != nil {
 		log.Printf("Error fetching files from database: %v", err)
 		return nil, fmt.Errorf("failed to fetch files: %v", err)
@@ -530,7 +576,8 @@ func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
 		var file model.File
 		var createdAt string
 		var fileData []byte
-		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData); err != nil {
+		var nodeID sql.NullString
+		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData, &nodeID); err != nil {
 			log.Printf("Error scanning file row: %v", err)
 			return nil, fmt.Errorf("failed to scan file row: %v", err)
 		}
@@ -538,6 +585,12 @@ func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
 		if fileData != nil {
 			encodedFileData := base64.StdEncoding.EncodeToString(fileData)
 			file.FileData = &encodedFileData
+		}
+
+		// Set the nodeId on the file
+		if nodeID.Valid {
+			nodeIDStr := nodeID.String
+			file.NodeID = &nodeIDStr
 		}
 
 		// Hämtar metadata för varje fil
@@ -681,6 +734,89 @@ func (r *queryResolver) DownloadFile(ctx context.Context, id string) (*model.Fil
 	return &file, nil
 }
 
+// GetFilesByNodeID is the resolver for the getFilesByNodeId field.
+func (r *queryResolver) GetFilesByNodeID(ctx context.Context, nodeID string) ([]*model.File, error) {
+	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Verify the node exists
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if node exists: %v", err)
+		return nil, fmt.Errorf("failed to verify node: %v", err)
+	}
+	if !exists {
+		log.Printf("Node with ID %s does not exist", nodeID)
+		return nil, fmt.Errorf("node not found")
+	}
+
+	// Query files for this specific node
+	rows, err := r.DB.Query(`
+		SELECT id, name, size, content_type, created_at, file_data 
+		FROM files 
+		WHERE node_id = ?
+		ORDER BY name ASC
+	`, nodeID)
+	if err != nil {
+		log.Printf("Error fetching files for node ID %s: %v", nodeID, err)
+		return nil, fmt.Errorf("failed to fetch files: %v", err)
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var file model.File
+		var createdAt string
+		var fileData []byte
+		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData); err != nil {
+			log.Printf("Error scanning file row: %v", err)
+			return nil, fmt.Errorf("failed to scan file row: %v", err)
+		}
+		file.CreatedAt = createdAt
+
+		// Don't send file data in listing, only metadata
+		// We'll only include the file data when explicitly downloading the file
+
+		// Set the nodeId on the file
+		file.NodeID = &nodeID
+
+		// Fetch metadata for each file
+		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
+		if err != nil {
+			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
+			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
+		}
+
+		var metadata []*model.Metadata
+		for metaRows.Next() {
+			var meta model.Metadata
+			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
+				log.Printf("Error scanning metadata row: %v", err)
+				metaRows.Close()
+				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
+			}
+			metadata = append(metadata, &meta)
+		}
+		metaRows.Close()
+
+		file.Metadata = metadata
+		files = append(files, &file)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over file rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
+	}
+
+	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
+	return files, nil
+}
+
 // GetRootNodes hämtar alla noder som inte har någon förälder (top-level noder)
 func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error) {
 	logAction("Fetching root nodes")
@@ -704,9 +840,9 @@ func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error)
 	return scanNodeRows(rows)
 }
 
-// GetNodeById implementerar Query.getNodeById
-func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
-	return getNodeById(ctx, r.DB, id)
+// GetNodeByID är anslutningen mot genererad kod för getNodeById
+func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
+	return r.GetNodeById(ctx, id)
 }
 
 // GetChildNodes hämtar alla noder som har ett specifikt förälder-ID
@@ -758,7 +894,160 @@ func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, 
 	}, nil
 }
 
-// Children hanterar laddning av barnnoder för en nod
+type mutationResolver struct{ *Resolver }
+type queryResolver struct{ *Resolver }
+type todoResolver struct{ *Resolver }
+
+// Helper functions outside of resolver types
+
+// Log action with a standard format
+func logAction(action string) {
+	log.Printf("[ACTION] %s", action)
+}
+
+// Get node by ID - shared helper function used by both query and mutation resolvers
+func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
+	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
+
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	row := db.QueryRow(`
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
+		WHERE id = ?
+	`, id)
+
+	var node model.Node
+	var parentID sql.NullString
+	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		log.Printf("Node with ID %s not found", id)
+		return nil, fmt.Errorf("node not found")
+	} else if err != nil {
+		log.Printf("Error fetching node with ID %s: %v", id, err)
+		return nil, fmt.Errorf("failed to fetch node: %v", err)
+	}
+
+	if parentID.Valid {
+		parentIDStr := parentID.String
+		node.ParentID = &parentIDStr
+	}
+
+	// Hämta alla barn till denna nod
+	rows, err := db.Query(`
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, node.ID)
+	if err != nil {
+		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
+		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
+	}
+	defer rows.Close()
+
+	children, err := scanNodeRows(rows)
+	if err != nil {
+		log.Printf("Error scanning child rows: %v", err)
+		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
+	}
+
+	node.Children = children
+	return &node, nil
+}
+
+// Implementation for resolving files by node ID
+func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]*model.File, error) {
+	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Verify the node exists
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if node exists: %v", err)
+		return nil, fmt.Errorf("failed to verify node: %v", err)
+	}
+	if !exists {
+		log.Printf("Node with ID %s does not exist", nodeID)
+		return nil, fmt.Errorf("node not found")
+	}
+
+	// Query files for this specific node
+	rows, err := r.DB.Query(`
+		SELECT id, name, size, content_type, created_at, file_data 
+		FROM files 
+		WHERE node_id = ?
+		ORDER BY name ASC
+	`, nodeID)
+	if err != nil {
+		log.Printf("Error fetching files for node ID %s: %v", nodeID, err)
+		return nil, fmt.Errorf("failed to fetch files: %v", err)
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var file model.File
+		var createdAt string
+		var fileData []byte
+		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData); err != nil {
+			log.Printf("Error scanning file row: %v", err)
+			return nil, fmt.Errorf("failed to scan file row: %v", err)
+		}
+		file.CreatedAt = createdAt
+
+		// Don't send file data in listing, only metadata
+		// We'll only include the file data when explicitly downloading the file
+
+		// Set the nodeId on the file
+		file.NodeID = &nodeID
+
+		// Fetch metadata for each file
+		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
+		if err != nil {
+			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
+			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
+		}
+
+		var metadata []*model.Metadata
+		for metaRows.Next() {
+			var meta model.Metadata
+			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
+				log.Printf("Error scanning metadata row: %v", err)
+				metaRows.Close()
+				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
+			}
+			metadata = append(metadata, &meta)
+		}
+		metaRows.Close()
+
+		file.Metadata = metadata
+		files = append(files, &file)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over file rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
+	}
+
+	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
+	return files, nil
+}
+
+// Implementation of GetNodeById for proper getNodeById execution
+func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
+	return getNodeById(ctx, r.DB, id)
+}
+
+// Resolver for the children field in Node type
 func (r *nodeResolver) Children(ctx context.Context, obj *model.Node) ([]*model.Node, error) {
 	logAction(fmt.Sprintf("Resolving children for node with ID: %s", obj.ID))
 
@@ -767,8 +1056,8 @@ func (r *nodeResolver) Children(ctx context.Context, obj *model.Node) ([]*model.
 	}
 
 	rows, err := r.DB.Query(`
-		SELECT id, name, parent_id, created_at, updated_at 
-		FROM nodes 
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
 		WHERE parent_id = ?
 		ORDER BY name ASC
 	`, obj.ID)
@@ -781,7 +1070,7 @@ func (r *nodeResolver) Children(ctx context.Context, obj *model.Node) ([]*model.
 	return scanNodeRows(rows)
 }
 
-// Parent hanterar laddning av föräldernode för en nod
+// Resolver for the parent field in Node type
 func (r *nodeResolver) Parent(ctx context.Context, obj *model.Node) (*model.Node, error) {
 	if obj.ParentID == nil {
 		return nil, nil // Ingen förälder
@@ -796,7 +1085,86 @@ func (r *nodeResolver) Parent(ctx context.Context, obj *model.Node) (*model.Node
 	return getNodeById(ctx, r.DB, *obj.ParentID)
 }
 
-// Hjälpfunktion för att scanna rader från SQL-fråga till Node-objekt
+// Resolver for the files field in Node type
+func (r *nodeResolver) Files(ctx context.Context, obj *model.Node) ([]*model.File, error) {
+	logAction(fmt.Sprintf("Resolving files for node with ID: %s", obj.ID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	// Query files for this specific node
+	rows, err := r.DB.Query(`
+		SELECT id, name, size, content_type, created_at, node_id
+		FROM files
+		WHERE node_id = ?`, obj.ID)
+	if err != nil {
+		log.Printf("Error fetching files for node ID %s: %v", obj.ID, err)
+		return nil, fmt.Errorf("failed to fetch files: %v", err)
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var file model.File
+		var createdAt string
+		var nodeIDStr string
+
+		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &nodeIDStr); err != nil {
+			log.Printf("Error scanning file row: %v", err)
+			return nil, fmt.Errorf("failed to scan file row: %v", err)
+		}
+
+		file.CreatedAt = createdAt
+		file.NodeID = &nodeIDStr
+
+		// Fetch metadata for each file
+		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
+		if err != nil {
+			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
+			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
+		}
+
+		var metadata []*model.Metadata
+		for metaRows.Next() {
+			var meta model.Metadata
+			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
+				log.Printf("Error scanning metadata row: %v", err)
+				metaRows.Close()
+				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
+			}
+			metadata = append(metadata, &meta)
+		}
+		metaRows.Close()
+		file.Metadata = metadata
+		files = append(files, &file)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over file rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
+	}
+
+	log.Printf("Successfully fetched %d files for node ID %s", len(files), obj.ID)
+	return files, nil
+}
+
+// Resolver for the node field in File type
+func (r *fileResolver) Node(ctx context.Context, obj *model.File) (*model.Node, error) {
+	if obj.NodeID == nil {
+		return nil, nil
+	}
+
+	logAction(fmt.Sprintf("Resolving node for file with ID: %s", obj.ID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	return getNodeById(ctx, r.DB, *obj.NodeID)
+}
+
+// Helper function to scan rows into Node objects
 func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 	var nodes []*model.Node
 	for rows.Next() {
@@ -824,7 +1192,7 @@ func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 	return nodes, nil
 }
 
-// Hjälpfunktion för att detektera cykler i nodträdet
+// Utility function to detect cycles in the node hierarchy
 func (r *mutationResolver) detectCycle(nodeID, potentialParentID string, isCycle *bool) error {
 	// Om potentiell förälder är samma som noden själv, har vi en cykel
 	if nodeID == potentialParentID {
@@ -859,12 +1227,6 @@ func (r *mutationResolver) detectCycle(nodeID, potentialParentID string, isCycle
 	return rows.Err()
 }
 
-// GetNodeByID är anslutningen mot genererad kod för getNodeById
-func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
-	return r.GetNodeById(ctx, id)
-}
-
-type mutationResolver struct{ *Resolver }
-type queryResolver struct{ *Resolver }
-type todoResolver struct{ *Resolver }
+// Define resolver types
 type nodeResolver struct{ *Resolver }
+type fileResolver struct{ *Resolver }

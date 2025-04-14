@@ -10,6 +10,8 @@ type File struct {
 	CreatedAt   string      `json:"createdAt"`
 	FileData    *string     `json:"fileData,omitempty"`
 	Metadata    []*Metadata `json:"metadata,omitempty"`
+	NodeID      *string     `json:"nodeId,omitempty"`
+	Node        *Node       `json:"node,omitempty"`
 }
 
 type FileInput struct {
@@ -18,6 +20,7 @@ type FileInput struct {
 	ContentType string           `json:"contentType"`
 	FileData    string           `json:"fileData"`
 	Metadata    []*MetadataInput `json:"metadata,omitempty"`
+	NodeID      *string          `json:"nodeId,omitempty"`
 }
 
 type Metadata struct {
@@ -41,6 +44,7 @@ type Node struct {
 	UpdatedAt string  `json:"updatedAt"`
 	Children  []*Node `json:"children,omitempty"`
 	Parent    *Node   `json:"parent,omitempty"`
+	Files     []*File `json:"files,omitempty"`
 }
 
 type NodeInput struct {
