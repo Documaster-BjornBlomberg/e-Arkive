@@ -17,22 +17,28 @@
         <!-- Main content area with file list -->
         <div class="file-content-area">
           <div class="list-header">
-            <h2>{{ currentNodeName }}</h2>
-            <div class="list-actions">
-              <Button 
-                :icon="viewMode === 'sidepanel' ? 'view_module' : 'view_sidebar'" 
-                @click="toggleViewMode" 
-                variant="default"
-                :title="viewMode === 'sidepanel' ? 'Switch to expandable view' : 'Switch to sidebar view'">
-                {{ viewMode === 'sidepanel' ? 'Expanderbar vy' : 'Sidopanel vy' }}
-              </Button>
-              <Button 
-                icon="refresh"
-                @click="handleRefresh"
-                variant="default"
-                title="Uppdatera">
-                Uppdatera
-              </Button>
+            <div class="list-header-content">
+              <h2>{{ currentNodeName }}</h2>
+              <div class="list-actions">
+                <div class="view-mode-buttons">
+                  <Button 
+                    v-for="mode in viewModes"
+                    :key="mode.id"
+                    :icon="mode.icon"
+                    :variant="viewMode === mode.id ? 'primary' : 'default'"
+                    @click="viewMode = mode.id"
+                    :title="mode.label">
+                    {{ mode.label }}
+                  </Button>
+                </div>
+                <Button 
+                  icon="refresh"
+                  @click="handleRefresh"
+                  variant="default"
+                  title="Uppdatera">
+                  Uppdatera
+                </Button>
+              </div>
             </div>
           </div>
           
@@ -43,12 +49,13 @@
             :expanded-file-id="expandedFileId" 
             :view-mode="viewMode"
             @select-file="handleFileSelect" 
-            @toggle-expand="handleFileExpand" />
+            @toggle-expand="handleFileExpand"
+            @update:viewMode="updateViewMode" />
         </div>
         
         <!-- Detail side panel for selected file -->
         <FileDetailSidepanel 
-          v-if="selectedFile && viewMode === 'sidepanel'" 
+          v-if="selectedFile && showSidepanel" 
           :file="selectedFile"
           :is-open="!!selectedFile"
           :is-editing="isEditingMetadata"
@@ -104,8 +111,15 @@ const {
   initialize
 } = useNodeHandling();
 
+const viewModes = [
+  { id: 'table', label: 'Tabellvy', icon: 'table_rows' },
+  { id: 'grid', label: 'Rutnätsvy', icon: 'grid_view' },
+  { id: 'card', label: 'Kortvy', icon: 'view_agenda' },
+  { id: 'split', label: 'Delad vy', icon: 'view_sidebar' }
+];
+
 // UI state
-const viewMode = ref('sidepanel'); // 'sidepanel' or 'expandable'
+const viewMode = ref(localStorage.getItem('preferredViewMode') || 'table');
 const files = ref([]);
 const selectedFileId = ref(null);
 const expandedFileId = ref(null);
@@ -125,19 +139,21 @@ const currentNodeName = computed(() => {
   return 'Alla dokument';
 });
 
-// Toggle between sidepanel and expandable view modes
-const toggleViewMode = () => {
-  viewMode.value = viewMode.value === 'sidepanel' ? 'expandable' : 'sidepanel';
-  if (viewMode.value === 'expandable') {
-    selectedFileId.value = null;
-    selectedFile.value = null;
-  }
+// Computed property to determine if sidepanel should be shown
+const showSidepanel = computed(() => {
+  return viewMode.value !== 'split';
+});
+
+// Update view mode and save preference
+const updateViewMode = (mode) => {
+  viewMode.value = mode;
+  localStorage.setItem('preferredViewMode', mode);
 };
 
 // Handle file selection
 const handleFileSelect = async (fileId) => {
-  if (selectedFileId.value === fileId) {
-    // Toggle off if already selected
+  if (selectedFileId.value === fileId && viewMode.value !== 'split') {
+    // Toggle off if already selected, except in split view
     selectedFileId.value = null;
     selectedFile.value = null;
     return;
@@ -154,7 +170,7 @@ const handleFileSelect = async (fileId) => {
   }
 };
 
-// Handle file expand toggle (for expandable view mode)
+// Handle file expand toggle
 const handleFileExpand = (fileId) => {
   if (expandedFileId.value === fileId) {
     expandedFileId.value = null;
@@ -165,8 +181,10 @@ const handleFileExpand = (fileId) => {
 
 // Handle closing the sidepanel
 const handleCloseSidepanel = () => {
-  selectedFileId.value = null;
-  selectedFile.value = null;
+  if (viewMode.value !== 'split') {
+    selectedFileId.value = null;
+    selectedFile.value = null;
+  }
   isEditingMetadata.value = false;
 };
 
@@ -332,7 +350,7 @@ onMounted(async () => {
 
 <style scoped>
 .list-page {
-  height: calc(100vh - 70px); /* Adjust based on header height */
+  height: calc(100vh - 70px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -352,12 +370,19 @@ onMounted(async () => {
 }
 
 .list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   padding: 15px 20px;
   background: var(--surface-color);
   border-bottom: 1px solid var(--border-color);
+}
+
+.list-header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.list-header h2 {
+  margin: 0;
 }
 
 .list-actions {
@@ -366,10 +391,10 @@ onMounted(async () => {
   align-items: center;
 }
 
-h2 {
-  font-size: 1.5rem;
-  font-weight: 500;
-  color: var(--text-color);
-  margin: 0;
+.view-mode-buttons {
+  display: flex;
+  gap: 5px;
 }
+
+/* ... existing styles ... */
 </style>
