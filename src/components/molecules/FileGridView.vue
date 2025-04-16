@@ -23,41 +23,46 @@
 
       <!-- Hover preview -->
       <div class="hover-preview">
-        <div class="preview-header">
-          <h4>{{ file.name }}</h4>
-          <div class="preview-actions">
-            <button 
-              class="preview-action"
-              title="Ladda ner"
-              @click.stop="$emit('download', file)">
-              <span class="material-icons">download</span>
-            </button>
-            <button 
-              class="preview-action"
-              title="Redigera metadata"
-              @click.stop="$emit('edit', file)">
-              <span class="material-icons">edit</span>
-            </button>
+        <div class="preview-content">
+          <div class="preview-header">
+            <h4>{{ file.name }}</h4>
+          </div>
+
+          <div class="preview-metadata">
+            <h5>Metadata</h5>
+            <div v-if="file.metadata?.length" class="metadata-preview">
+              <div 
+                v-for="(meta, index) in file.metadata.slice(0, 3)" 
+                :key="index"
+                class="metadata-item">
+                <span class="metadata-key">{{ meta.key }}:</span>
+                <span class="metadata-value">{{ meta.value }}</span>
+              </div>
+              <div v-if="file.metadata.length > 3" class="metadata-more">
+                +{{ file.metadata.length - 3 }} fler fält
+              </div>
+            </div>
+            <div v-else class="no-metadata">
+              Ingen metadata tillgänglig
+            </div>
           </div>
         </div>
 
-        <div class="preview-metadata">
-          <h5>Metadata</h5>
-          <div v-if="file.metadata?.length" class="metadata-preview">
-            <div 
-              v-for="(meta, index) in file.metadata.slice(0, 3)" 
-              :key="index"
-              class="metadata-item">
-              <span class="metadata-key">{{ meta.key }}:</span>
-              <span class="metadata-value">{{ meta.value }}</span>
-            </div>
-            <div v-if="file.metadata.length > 3" class="metadata-more">
-              +{{ file.metadata.length - 3 }} fler fält
-            </div>
-          </div>
-          <div v-else class="no-metadata">
-            Ingen metadata tillgänglig
-          </div>
+        <div class="preview-actions">
+          <button 
+            class="preview-action"
+            title="Ladda ner"
+            @click.stop="$emit('download', file)">
+            <span class="material-icons">download</span>
+            <span class="action-text">Ladda ner</span>
+          </button>
+          <button 
+            class="preview-action"
+            title="Redigera metadata"
+            @click.stop="$emit('edit', file)">
+            <span class="material-icons">edit</span>
+            <span class="action-text">Redigera</span>
+          </button>
         </div>
       </div>
     </div>
@@ -92,8 +97,8 @@ const formatFileSize = (bytes) => {
 .file-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 20px;
-  padding: 20px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .grid-item {
@@ -104,6 +109,12 @@ const formatFileSize = (bytes) => {
   background-color: var(--surface-color);
   cursor: pointer;
   transition: all 0.2s ease;
+  min-height: 200px;
+  max-height: 200px;
+  min-width: 200px;
+  max-width: 220px;
+  display: flex;
+  flex-direction: column;
 }
 
 .grid-item:hover {
@@ -118,30 +129,44 @@ const formatFileSize = (bytes) => {
 }
 
 .grid-item-content {
-  padding: 15px;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .file-icon {
   display: flex;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 
 .file-info {
   text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .file-name {
-  margin: 0 0 8px 0;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.85rem;
   word-break: break-word;
   color: var(--text-color);
+  line-height: 1.1;
+  max-height: 2.2em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .file-details {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--text-color-secondary);
-  margin-bottom: 8px;
+  margin: 2px 0;
 }
 
 .file-size, .file-type {
@@ -163,7 +188,6 @@ const formatFileSize = (bytes) => {
   transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
-  overflow: auto;
 }
 
 .grid-item:hover .hover-preview {
@@ -171,40 +195,69 @@ const formatFileSize = (bytes) => {
   visibility: visible;
 }
 
+.preview-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 50px; /* Minska padding för att ge mer utrymme för knappar */
+}
+
 .preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .preview-header h4 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: var(--text-color);
   word-break: break-word;
-  flex: 1;
-  padding-right: 10px;
 }
 
 .preview-actions {
   display: flex;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 8px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background: var(--surface-color);
+  border-top: 1px solid var(--border-color);
+  z-index: 2;
 }
 
 .preview-action {
-  background: none;
-  border: none;
-  padding: 4px;
+  flex: 1;
+  min-height: 32px;
+  background-color: var(--surface-color);
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--text-color);
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .preview-action:hover {
   background-color: var(--hover-color);
-  color: var(--text-color);
+  border-color: var(--primary-color);
+}
+
+.preview-action .material-icons {
+  font-size: 16px;
+  margin-right: 4px;
+}
+
+.action-text {
+  font-size: 0.75rem; /* Minska textstorleken något */
+  font-weight: 500;
+}
+
+.preview-metadata {
+  margin-top: 10px;
 }
 
 .preview-metadata h5 {

@@ -1,90 +1,97 @@
 <template>
   <div class="file-upload-form">
-    <form @submit.prevent="handleSubmit">
-      <!-- File Input Area -->
-      <div class="file-drop-area" @dragover.prevent="fileDragOver = true" @dragleave.prevent="fileDragOver = false" @drop.prevent="onFileDrop">
-        <div class="file-drop-content" :class="{ 'drag-over': fileDragOver, 'has-file': selectedFile }">
-          <div v-if="!selectedFile">
-            <span class="material-icons icon-large">cloud_upload</span>
-            <p>Dra och släpp filen här eller</p>
-            <div class="file-button-wrapper">
-              <Button @click="triggerFileInput" variant="primary">Välj fil</Button>
-              <input 
-                type="file" 
-                ref="fileInputRef" 
-                class="hidden-file-input"
-                @change="onFileSelect"
-                :accept="allowedFileTypes"
-              />
+    <div class="upload-layout">
+      <!-- Folder panel on the left -->
+      <FolderPanel
+        :nodes="availableNodes"
+        :is-loading="false"
+        :expanded-node-ids="expandedNodeIds"
+        :selected-node-id="selectedNodeId"
+        @toggle-expand="handleNodeExpand"
+        @select-node="handleNodeSelect"
+        @add-node="handleAddNode"
+        @rename-node="handleRenameNode"
+        @delete-node="handleDeleteNode"
+      />
+
+      <!-- Upload form on the right -->
+      <div class="upload-content">
+        <form @submit.prevent="handleSubmit">
+          <!-- File Input Area -->
+          <div class="file-drop-area" @dragover.prevent="fileDragOver = true" @dragleave.prevent="fileDragOver = false" @drop.prevent="onFileDrop">
+            <div class="file-drop-content" :class="{ 'drag-over': fileDragOver, 'has-file': selectedFile }">
+              <div v-if="!selectedFile">
+                <span class="material-icons icon-large">cloud_upload</span>
+                <p>Dra och släpp filen här eller</p>
+                <div class="file-button-wrapper">
+                  <Button @click="triggerFileInput" variant="primary">Välj fil</Button>
+                  <input 
+                    type="file" 
+                    ref="fileInputRef" 
+                    class="hidden-file-input"
+                    @change="onFileSelect"
+                    :accept="allowedFileTypes"
+                  />
+                </div>
+              </div>
+              <div v-else class="selected-file-preview">
+                <FileIcon :fileName="selectedFile.name" :fileType="fileType" />
+                <div class="file-info">
+                  <div class="file-name">{{ selectedFile.name }}</div>
+                  <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+                  <div class="selected-folder" v-if="currentNodeName">
+                    <span class="material-icons">folder</span>
+                    {{ currentNodeName }}
+                  </div>
+                </div>
+                <button type="button" class="remove-file-btn" @click="removeFile">
+                  <span class="material-icons">close</span>
+                </button>
+              </div>
             </div>
           </div>
-          <div v-else class="selected-file-preview">
-            <FileIcon :fileName="selectedFile.name" :fileType="fileType" />
-            <div class="file-info">
-              <div class="file-name">{{ selectedFile.name }}</div>
-              <div class="file-size">{{ formatFileSize(selectedFile.size) }}</div>
+
+          <!-- Metadata Section -->
+          <div class="metadata-section">
+            <h3>Metadata</h3>
+            <p class="section-description">Lägg till relevant information om dokumentet</p>
+
+            <div v-for="(meta, index) in metadata" :key="index" class="metadata-field">
+              <div class="metadata-inputs">
+                <InputField 
+                  label="Nyckel" 
+                  v-model="meta.key" 
+                  placeholder="Nyckel"
+                  class="metadata-key" />
+                <InputField 
+                  label="Värde" 
+                  v-model="meta.value" 
+                  placeholder="Värde"
+                  class="metadata-value" />
+              </div>
+              <button type="button" class="remove-metadata-btn" @click="removeMetadata(index)">
+                <span class="material-icons">delete_outline</span>
+              </button>
             </div>
-            <button type="button" class="remove-file-btn" @click="removeFile">
-              <span class="material-icons">close</span>
+
+            <button type="button" class="add-metadata-btn" @click="addMetadata">
+              <span class="material-icons">add</span>
+              Lägg till metadata
             </button>
           </div>
-        </div>
-      </div>
 
-      <!-- Node Selection (Folder) -->
-      <div class="form-group">
-        <label for="node-select">Mapp:</label>
-        <select 
-          id="node-select" 
-          v-model="selectedNodeId" 
-          class="form-select"
-          @change="$emit('node-change', selectedNodeId)">
-          <option v-for="node in availableNodes" :key="node.id" :value="node.id">
-            {{ node.name }}
-          </option>
-        </select>
-        <small class="form-hint">Välj vilken mapp dokumentet ska placeras i</small>
-      </div>
-
-      <!-- Metadata Section -->
-      <div class="metadata-section">
-        <h3>Metadata</h3>
-        <p class="section-description">Lägg till relevant information om dokumentet</p>
-
-        <div v-for="(meta, index) in metadata" :key="index" class="metadata-field">
-          <div class="metadata-inputs">
-            <InputField 
-              label="Nyckel" 
-              v-model="meta.key" 
-              placeholder="Nyckel"
-              class="metadata-key" />
-            <InputField 
-              label="Värde" 
-              v-model="meta.value" 
-              placeholder="Värde"
-              class="metadata-value" />
+          <div class="form-actions">
+            <Button 
+              type="submit" 
+              primary 
+              :disabled="!formValid || isUploading"
+              :loading="isUploading">
+              {{ isUploading ? 'Laddar upp...' : 'Ladda upp dokument' }}
+            </Button>
           </div>
-          <button type="button" class="remove-metadata-btn" @click="removeMetadata(index)">
-            <span class="material-icons">delete_outline</span>
-          </button>
-        </div>
-
-        <button type="button" class="add-metadata-btn" @click="addMetadata">
-          <span class="material-icons">add</span>
-          Lägg till metadata
-        </button>
+        </form>
       </div>
-
-      <div class="form-actions">
-        <Button 
-          type="submit" 
-          primary 
-          :disabled="!formValid || isUploading"
-          :loading="isUploading">
-          {{ isUploading ? 'Laddar upp...' : 'Ladda upp dokument' }}
-        </Button>
-      </div>
-    </form>
+    </div>
   </div>
 </template>
 
@@ -93,6 +100,7 @@ import { ref, computed, watch } from 'vue';
 import Button from '../atoms/Button.vue';
 import FileIcon from '../atoms/FileIcon.vue';
 import InputField from '../atoms/InputField.vue';
+import FolderPanel from '../organisms/FolderPanel.vue';
 
 const props = defineProps({
   isUploading: {
@@ -200,6 +208,39 @@ const removeMetadata = (index) => {
   if (metadata.value.length === 0) {
     addMetadata(); // Always have at least one metadata field
   }
+};
+
+// Add new refs for FolderPanel
+const expandedNodeIds = ref(new Set());
+const currentNodeName = computed(() => {
+  const selectedNode = props.availableNodes.find(node => node.id === selectedNodeId.value);
+  return selectedNode?.name || '';
+});
+
+// Node handling methods
+const handleNodeExpand = (nodeId) => {
+  if (expandedNodeIds.value.has(nodeId)) {
+    expandedNodeIds.value.delete(nodeId);
+  } else {
+    expandedNodeIds.value.add(nodeId);
+  }
+};
+
+const handleNodeSelect = (nodeId) => {
+  selectedNodeId.value = nodeId;
+  emit('node-change', nodeId);
+};
+
+const handleAddNode = (nodeName, parentId) => {
+  // TODO: Implement if needed
+};
+
+const handleRenameNode = (nodeId, newName) => {
+  // TODO: Implement if needed
+};
+
+const handleDeleteNode = (nodeId) => {
+  // TODO: Implement if needed
 };
 
 // Form submission handler
@@ -441,7 +482,36 @@ const handleSubmit = async () => {
   white-space: nowrap;
   word-wrap: normal;
   direction: ltr;
+  font-feature-settings: 'liga';
   -webkit-font-feature-settings: 'liga';
   -webkit-font-smoothing: antialiased;
+}
+
+.upload-layout {
+  display: flex;
+  gap: 20px;
+  min-height: 600px;
+}
+
+.upload-content {
+  flex: 1;
+  padding: 20px;
+  background: var(--surface-color);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.selected-folder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--text-color-secondary);
+  font-size: 0.9em;
+}
+
+.selected-folder .material-icons {
+  font-size: 16px;
+  color: var(--folder-color);
 }
 </style>
