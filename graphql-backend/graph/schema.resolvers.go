@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // SaveFile är resolvern för saveFile-fältet
@@ -558,6 +559,139 @@ func (r *mutationResolver) DeleteNode(ctx context.Context, id string) (bool, err
 	return true, nil
 }
 
+// Login is the resolver for the login field.
+func (r *mutationResolver) Login(ctx context.Context, username string, password string) (*model.AuthPayload, error) {
+	logAction(fmt.Sprintf("Login attempt for user: %s", username))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Query the database for the user with the provided username
+	var id string
+	var passwordHash string
+	var name string
+	err := r.DB.QueryRow("SELECT id, password_hash, username FROM users WHERE username = ?", username).Scan(&id, &passwordHash, &name)
+
+	// Check if user exists
+	if err == sql.ErrNoRows {
+		log.Printf("User not found: %s", username)
+		return nil, fmt.Errorf("invalid username or password")
+	} else if err != nil {
+		log.Printf("Error querying user: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Compare the provided password with the stored hash
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	if err != nil {
+		log.Printf("Invalid password for user: %s", username)
+		return nil, fmt.Errorf("invalid username or password")
+	}
+
+	// Generate JWT token
+	token, err := generateJWT(id, username)
+	if err != nil {
+		log.Printf("Error generating JWT token: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Return the auth payload
+	return &model.AuthPayload{
+		Token: token,
+		User: &model.User{
+			ID:       id,
+			Name:     name,
+			Username: username,
+		},
+	}, nil
+}
+
+// Register is the resolver for the register field.
+func (r *mutationResolver) Register(ctx context.Context, username string, password string) (*model.AuthPayload, error) {
+	logAction(fmt.Sprintf("Registration attempt for user: %s", username))
+
+	if r.DB == nil {
+		log.Printf("Database connection is nil")
+		return nil, fmt.Errorf("internal server error: database connection is not initialized")
+	}
+
+	// Check if username already exists
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	if exists {
+		log.Printf("Username already taken: %s", username)
+		return nil, fmt.Errorf("username already taken")
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Start a transaction
+	tx, err := r.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Insert the new user
+	result, err := tx.Exec(
+		"INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, datetime('now'))",
+		username, string(hashedPassword),
+	)
+	if err != nil {
+		log.Printf("Error inserting user: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Get the user ID
+	userID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Error retrieving user ID: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Generate JWT token
+	token, err := generateJWT(fmt.Sprintf("%d", userID), username)
+	if err != nil {
+		log.Printf("Error generating JWT token: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	log.Printf("User registered successfully: %s", username)
+
+	// Return the auth payload
+	return &model.AuthPayload{
+		Token: token,
+		User: &model.User{
+			ID:       fmt.Sprintf("%d", userID),
+			Name:     username,
+			Username: username,
+		},
+	}, nil
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -734,8 +868,151 @@ func (r *queryResolver) DownloadFile(ctx context.Context, id string) (*model.Fil
 	return &file, nil
 }
 
-// GetFilesByNodeID is the resolver for the getFilesByNodeId field.
+// Correcting the method name to match the expected interface
 func (r *queryResolver) GetFilesByNodeID(ctx context.Context, nodeID string) ([]*model.File, error) {
+	return r.GetFilesByNodeId(ctx, nodeID)
+}
+
+// GetRootNodes hämtar alla noder som inte har någon förälder (top-level noder)
+func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error) {
+	logAction("Fetching root nodes")
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	rows, err := r.DB.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id IS NULL
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		log.Printf("Error fetching root nodes: %v", err)
+		return nil, fmt.Errorf("failed to fetch root nodes: %v", err)
+	}
+	defer rows.Close()
+
+	return scanNodeRows(rows)
+}
+
+// GetNodeByID is the resolver for the getNodeById field.
+func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
+	panic(fmt.Errorf("not implemented: GetNodeByID - getNodeById"))
+}
+
+// GetChildNodes hämtar alla noder som har ett specifikt förälder-ID
+func (r *queryResolver) GetChildNodes(ctx context.Context, parentID string) ([]*model.Node, error) {
+	logAction(fmt.Sprintf("Fetching child nodes for parent ID: %s", parentID))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	// Kontrollera att föräldern finns
+	var exists bool
+	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", parentID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if parent node exists: %v", err)
+		return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("Parent node with ID %s does not exist", parentID)
+		return nil, fmt.Errorf("parent node not found")
+	}
+
+	rows, err := r.DB.Query(`
+		SELECT id, name, parent_id, created_at, updated_at 
+		FROM nodes 
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, parentID)
+	if err != nil {
+		log.Printf("Error fetching child nodes: %v", err)
+		return nil, fmt.Errorf("failed to fetch child nodes: %v", err)
+	}
+	defer rows.Close()
+
+	return scanNodeRows(rows)
+}
+
+// Hello implementerar Query.hello
+func (r *queryResolver) Hello(ctx context.Context) (string, error) {
+	return "Hello from GraphQL!", nil
+}
+
+// Me is the resolver for the me field.
+func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
+	logAction("Fetching current user from JWT token")
+
+	// Get the token from the context
+	token, ok := GetAuthToken(ctx)
+	if !ok {
+		return nil, fmt.Errorf("not authenticated")
+	}
+
+	// Parse and validate the token
+	claims, err := validateJWT(token)
+	if err != nil {
+		log.Printf("Error validating JWT token: %v", err)
+		return nil, fmt.Errorf("not authenticated")
+	}
+
+	// Get user ID from claims
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		log.Printf("Invalid token claims: user_id not found")
+		return nil, fmt.Errorf("invalid authentication token")
+	}
+
+	// Get username from claims
+	username, ok := claims["username"].(string)
+	if !ok {
+		log.Printf("Invalid token claims: username not found")
+		return nil, fmt.Errorf("invalid authentication token")
+	}
+
+	// Return user information
+	return &model.User{
+		ID:       userID,
+		Name:     username, // Using username as name for simplicity
+		Username: username,
+	}, nil
+}
+
+// User implementerar Todo.user
+func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
+	return &model.User{
+		ID:   "1", // Exempel-ID eftersom detta är en dummy-implementation
+		Name: "Example User",
+	}, nil
+}
+
+// Mutation returns MutationResolver implementation.
+func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+
+// Query returns QueryResolver implementation.
+func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
+
+// Todo returns TodoResolver implementation.
+func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
+
+type mutationResolver struct{ *Resolver }
+type queryResolver struct{ *Resolver }
+type todoResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func logAction(action string) {
+	log.Printf("[ACTION] %s", action)
+}
+func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]*model.File, error) {
 	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
 
 	if r.DB == nil {
@@ -757,8 +1034,8 @@ func (r *queryResolver) GetFilesByNodeID(ctx context.Context, nodeID string) ([]
 
 	// Query files for this specific node
 	rows, err := r.DB.Query(`
-		SELECT id, name, size, content_type, created_at, file_data 
-		FROM files 
+		SELECT id, name, size, content_type, created_at, file_data
+		FROM files
 		WHERE node_id = ?
 		ORDER BY name ASC
 	`, nodeID)
@@ -816,96 +1093,9 @@ func (r *queryResolver) GetFilesByNodeID(ctx context.Context, nodeID string) ([]
 	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
 	return files, nil
 }
-
-// GetRootNodes hämtar alla noder som inte har någon förälder (top-level noder)
-func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error) {
-	logAction("Fetching root nodes")
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	rows, err := r.DB.Query(`
-		SELECT id, name, parent_id, created_at, updated_at 
-		FROM nodes 
-		WHERE parent_id IS NULL
-		ORDER BY name ASC
-	`)
-	if err != nil {
-		log.Printf("Error fetching root nodes: %v", err)
-		return nil, fmt.Errorf("failed to fetch root nodes: %v", err)
-	}
-	defer rows.Close()
-
-	return scanNodeRows(rows)
+func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
+	return getNodeById(ctx, r.DB, id)
 }
-
-// GetNodeByID är anslutningen mot genererad kod för getNodeById
-func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
-	return r.GetNodeById(ctx, id)
-}
-
-// GetChildNodes hämtar alla noder som har ett specifikt förälder-ID
-func (r *queryResolver) GetChildNodes(ctx context.Context, parentID string) ([]*model.Node, error) {
-	logAction(fmt.Sprintf("Fetching child nodes for parent ID: %s", parentID))
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	// Kontrollera att föräldern finns
-	var exists bool
-	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", parentID).Scan(&exists)
-	if err != nil {
-		log.Printf("Error checking if parent node exists: %v", err)
-		return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
-	}
-
-	if !exists {
-		log.Printf("Parent node with ID %s does not exist", parentID)
-		return nil, fmt.Errorf("parent node not found")
-	}
-
-	rows, err := r.DB.Query(`
-		SELECT id, name, parent_id, created_at, updated_at 
-		FROM nodes 
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, parentID)
-	if err != nil {
-		log.Printf("Error fetching child nodes: %v", err)
-		return nil, fmt.Errorf("failed to fetch child nodes: %v", err)
-	}
-	defer rows.Close()
-
-	return scanNodeRows(rows)
-}
-
-// Hello implementerar Query.hello
-func (r *queryResolver) Hello(ctx context.Context) (string, error) {
-	return "Hello from GraphQL!", nil
-}
-
-// User implementerar Todo.user
-func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
-	return &model.User{
-		ID:   "1", // Exempel-ID eftersom detta är en dummy-implementation
-		Name: "Example User",
-	}, nil
-}
-
-type mutationResolver struct{ *Resolver }
-type queryResolver struct{ *Resolver }
-type todoResolver struct{ *Resolver }
-
-// Helper functions outside of resolver types
-
-// Log action with a standard format
-func logAction(action string) {
-	log.Printf("[ACTION] %s", action)
-}
-
-// Get node by ID - shared helper function used by both query and mutation resolvers
 func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
 	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
 
@@ -958,224 +1148,64 @@ func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error
 	node.Children = children
 	return &node, nil
 }
+type nodeResolver struct{ *Resolver }
+type fileResolver struct{ *Resolver }
+func generateJWT(userID, username string) (string, error) {
+	// Create a new JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  userID,
+		"username": username,
+		"exp":      time.Now().Add(time.Hour * 24 * 7).Unix(), // Token expires in 7 days
+	})
 
-// Implementation for resolving files by node ID
-func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]*model.File, error) {
-	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
-
-	if r.DB == nil {
-		log.Printf("Database connection is nil")
-		return nil, fmt.Errorf("internal server error: database connection is not initialized")
-	}
-
-	// Verify the node exists
-	var exists bool
-	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&exists)
+	// Sign the token with the secret key
+	// In a production environment, this should be stored securely and not hardcoded
+	jwtSecret := []byte("your-256-bit-secret") // Change this to a secure secret in production
+	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
-		log.Printf("Error checking if node exists: %v", err)
-		return nil, fmt.Errorf("failed to verify node: %v", err)
-	}
-	if !exists {
-		log.Printf("Node with ID %s does not exist", nodeID)
-		return nil, fmt.Errorf("node not found")
+		return "", err
 	}
 
-	// Query files for this specific node
-	rows, err := r.DB.Query(`
-		SELECT id, name, size, content_type, created_at, file_data 
-		FROM files 
-		WHERE node_id = ?
-		ORDER BY name ASC
-	`, nodeID)
+	return tokenString, nil
+}
+func validateJWT(tokenString string) (jwt.MapClaims, error) {
+	// Parse the token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Validate the signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
+		// Return the secret key
+		jwtSecret := []byte("your-256-bit-secret") // Change this to a secure secret in production
+		return jwtSecret, nil
+	})
+
 	if err != nil {
-		log.Printf("Error fetching files for node ID %s: %v", nodeID, err)
-		return nil, fmt.Errorf("failed to fetch files: %v", err)
-	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var file model.File
-		var createdAt string
-		var fileData []byte
-		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData); err != nil {
-			log.Printf("Error scanning file row: %v", err)
-			return nil, fmt.Errorf("failed to scan file row: %v", err)
-		}
-		file.CreatedAt = createdAt
-
-		// Don't send file data in listing, only metadata
-		// We'll only include the file data when explicitly downloading the file
-
-		// Set the nodeId on the file
-		file.NodeID = &nodeID
-
-		// Fetch metadata for each file
-		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
-		if err != nil {
-			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
-			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
-		}
-
-		var metadata []*model.Metadata
-		for metaRows.Next() {
-			var meta model.Metadata
-			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
-				log.Printf("Error scanning metadata row: %v", err)
-				metaRows.Close()
-				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
-			}
-			metadata = append(metadata, &meta)
-		}
-		metaRows.Close()
-
-		file.Metadata = metadata
-		files = append(files, &file)
+		return nil, err
 	}
 
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over file rows: %v", err)
-		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
+	// Check if the token is valid
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		return claims, nil
 	}
 
-	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
-	return files, nil
+	return nil, fmt.Errorf("invalid token")
 }
-
-// Implementation of GetNodeById for proper getNodeById execution
-func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
-	return getNodeById(ctx, r.DB, id)
-}
-
-// Resolver for the children field in Node type
-func (r *nodeResolver) Children(ctx context.Context, obj *model.Node) ([]*model.Node, error) {
-	logAction(fmt.Sprintf("Resolving children for node with ID: %s", obj.ID))
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	rows, err := r.DB.Query(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, obj.ID)
-	if err != nil {
-		log.Printf("Error fetching children for node ID %s: %v", obj.ID, err)
-		return nil, fmt.Errorf("failed to fetch children: %v", err)
-	}
-	defer rows.Close()
-
-	return scanNodeRows(rows)
-}
-
-// Resolver for the parent field in Node type
-func (r *nodeResolver) Parent(ctx context.Context, obj *model.Node) (*model.Node, error) {
-	if obj.ParentID == nil {
-		return nil, nil // Ingen förälder
-	}
-
-	logAction(fmt.Sprintf("Resolving parent for node with ID: %s", obj.ID))
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	return getNodeById(ctx, r.DB, *obj.ParentID)
-}
-
-// Resolver for the files field in Node type
-func (r *nodeResolver) Files(ctx context.Context, obj *model.Node) ([]*model.File, error) {
-	logAction(fmt.Sprintf("Resolving files for node with ID: %s", obj.ID))
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	// Query files for this specific node
-	rows, err := r.DB.Query(`
-		SELECT id, name, size, content_type, created_at, node_id
-		FROM files
-		WHERE node_id = ?`, obj.ID)
-	if err != nil {
-		log.Printf("Error fetching files for node ID %s: %v", obj.ID, err)
-		return nil, fmt.Errorf("failed to fetch files: %v", err)
-	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var file model.File
-		var createdAt string
-		var nodeIDStr string
-
-		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &nodeIDStr); err != nil {
-			log.Printf("Error scanning file row: %v", err)
-			return nil, fmt.Errorf("failed to scan file row: %v", err)
-		}
-
-		file.CreatedAt = createdAt
-		file.NodeID = &nodeIDStr
-
-		// Fetch metadata for each file
-		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
-		if err != nil {
-			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
-			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
-		}
-
-		var metadata []*model.Metadata
-		for metaRows.Next() {
-			var meta model.Metadata
-			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
-				log.Printf("Error scanning metadata row: %v", err)
-				metaRows.Close()
-				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
-			}
-			metadata = append(metadata, &meta)
-		}
-		metaRows.Close()
-		file.Metadata = metadata
-		files = append(files, &file)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over file rows: %v", err)
-		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
-	}
-
-	log.Printf("Successfully fetched %d files for node ID %s", len(files), obj.ID)
-	return files, nil
-}
-
-// Resolver for the node field in File type
-func (r *fileResolver) Node(ctx context.Context, obj *model.File) (*model.Node, error) {
-	if obj.NodeID == nil {
-		return nil, nil
-	}
-
-	logAction(fmt.Sprintf("Resolving node for file with ID: %s", obj.ID))
-
-	if r.DB == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	return getNodeById(ctx, r.DB, *obj.NodeID)
-}
-
-// Helper function to scan rows into Node objects
 func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 	var nodes []*model.Node
 	for rows.Next() {
 		var node model.Node
 		var parentID sql.NullString
+		var createdAt, updatedAt string
 
-		if err := rows.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &parentID, &createdAt, &updatedAt); err != nil {
 			log.Printf("Error scanning node row: %v", err)
 			return nil, fmt.Errorf("failed to scan node row: %v", err)
 		}
 
+		node.CreatedAt = createdAt
+		node.UpdatedAt = updatedAt
 		if parentID.Valid {
 			parentIDStr := parentID.String
 			node.ParentID = &parentIDStr
@@ -1191,42 +1221,37 @@ func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 
 	return nodes, nil
 }
-
-// Utility function to detect cycles in the node hierarchy
-func (r *mutationResolver) detectCycle(nodeID, potentialParentID string, isCycle *bool) error {
-	// Om potentiell förälder är samma som noden själv, har vi en cykel
-	if nodeID == potentialParentID {
+func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
+	// Om den nya föräldern är samma som noden själv, är det en cykel
+	if nodeID == newParentID {
 		*isCycle = true
 		return nil
 	}
 
-	// Hämta alla barnnoder till den aktuella noden
-	rows, err := r.DB.Query("SELECT id FROM nodes WHERE parent_id = ?", nodeID)
-	if err != nil {
+	// Kontrollera om den nya föräldern har den aktuella noden som förfader
+	var currentParentID sql.NullString
+	err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", newParentID).Scan(&currentParentID)
+	if err == sql.ErrNoRows {
+		// Om föräldern inte finns, är det inget problem
+		*isCycle = false
+		return nil
+	} else if err != nil {
 		return err
 	}
-	defer rows.Close()
 
-	// Kontrollera rekursivt för alla barn
-	var childID string
-	for rows.Next() {
-		if err := rows.Scan(&childID); err != nil {
-			return err
-		}
-
-		if *isCycle {
-			return nil // Avbryt om vi redan har hittat en cykel
-		}
-
-		// Rekursivt anrop för att kontrollera barnet och dess barn
-		if err := r.detectCycle(childID, potentialParentID, isCycle); err != nil {
-			return err
-		}
+	// Om förälderns förälder är NULL, är det slutet på kedjan - ingen cykel
+	if !currentParentID.Valid {
+		*isCycle = false
+		return nil
 	}
 
-	return rows.Err()
-}
+	// Om förälderns förälder är den aktuella noden, är det en cykel
+	if currentParentID.String == nodeID {
+		*isCycle = true
+		return nil
+	}
 
-// Define resolver types
-type nodeResolver struct{ *Resolver }
-type fileResolver struct{ *Resolver }
+	// Fortsätt rekursivt upp i hierarkin
+	return r.detectCycle(nodeID, currentParentID.String, isCycle)
+}
+*/

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -49,36 +50,19 @@ func initDB() {
 
 // createTables skapar alla nödvändiga tabeller i databasen om de inte redan finns
 func createTables() {
-	// Skapa files-tabell
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS files (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			size INTEGER NOT NULL,
-			content_type TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			file_data BLOB
-		)
-	`)
+	// Läs SQL från filen
+	sqlBytes, err := os.ReadFile("update_database.sql")
 	if err != nil {
-		log.Fatalf("Failed to create files table: %v", err)
+		log.Fatalf("Failed to read update_database.sql: %v", err)
 	}
 
-	// Skapa metadata-tabell
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS metadata (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			file_id INTEGER NOT NULL,
-			key TEXT NOT NULL,
-			value TEXT NOT NULL,
-			FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
-		)
-	`)
+	// Exekvera SQL-skriptet
+	_, err = db.Exec(string(sqlBytes))
 	if err != nil {
-		log.Fatalf("Failed to create metadata table: %v", err)
+		log.Fatalf("Failed to execute SQL script: %v", err)
 	}
 
-	log.Println("Database tables created or already exist")
+	log.Println("Database tables created or updated successfully")
 }
 
 // logRequest loggar alla inkommande HTTP-förfrågningar
@@ -142,6 +126,21 @@ func main() {
 	http.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
 		logAction("GraphQL query received")
+
+		// Extract JWT token from Authorization header
+		ctx := r.Context()
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			// Check if the header contains a Bearer token
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				token := strings.TrimPrefix(authHeader, "Bearer ")
+				// Add token to context
+				ctx = graph.WithAuthToken(ctx, token)
+				// Create a new request with the updated context
+				r = r.WithContext(ctx)
+			}
+		}
+
 		responseRecorder := &responseLogger{ResponseWriter: w}
 		srv.ServeHTTP(responseRecorder, r)
 		log.Printf("Response sent: %s", responseRecorder.body.String())

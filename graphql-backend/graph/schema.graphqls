@@ -12,6 +12,7 @@ type Todo {
 type User {
   id: ID!
   name: String!
+  username: String!
 }
 
 type Node {
@@ -25,6 +26,11 @@ type Node {
   files: [File]
 }
 
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
 type Query {
   getFiles: [File!]!
   getFile(id: ID!): File
@@ -34,6 +40,7 @@ type Query {
   getNodeById(id: ID!): Node
   getChildNodes(parentId: ID!): [Node!]!
   hello: String!
+  me: User
 }
 
 type Mutation {
@@ -45,6 +52,8 @@ type Mutation {
   createNode(input: NodeInput!): Node!
   updateNode(id: ID!, input: NodeUpdateInput!): Node!
   deleteNode(id: ID!): Boolean!
+  login(username: String!, password: String!): AuthPayload!
+  register(username: String!, password: String!): AuthPayload!
 }
 
 type File {

@@ -3,9 +3,40 @@
 <head>
   <title>GraphiQL</title>
   <link href="https://unpkg.com/graphiql/graphiql.min.css" rel="stylesheet" />
+  <style>
+    .auth-header {
+      padding: 10px;
+      background-color: #f3f3f3;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #ccc;
+    }
+    .auth-header input {
+      flex-grow: 1;
+      margin-left: 10px;
+      padding: 5px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+    .auth-header button {
+      margin-left: 5px;
+      padding: 5px 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body style="margin: 0;">
-  <div id="graphiql" style="height: 100vh;"></div>
+  <div class="auth-header">
+    <span>JWT Token:</span>
+    <input type="text" id="auth-token" placeholder="Enter your auth token here" />
+    <button onclick="updateAuthHeader()">Update</button>
+    <button onclick="clearAuthHeader()">Clear</button>
+  </div>
+  <div id="graphiql" style="height: calc(100vh - 52px);"></div>
   <script
     crossorigin
     src="https://unpkg.com/react/umd/react.production.min.js"
@@ -19,17 +50,43 @@
     src="https://unpkg.com/graphiql/graphiql.min.js"
   ></script>
   <script>
-    const graphQLFetcher = graphQLParams =>
-      fetch('/query', {
+    let headers = { 'Content-Type': 'application/json' };
+    
+    function updateAuthHeader() {
+      const token = document.getElementById('auth-token').value;
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+        alert('Auth token updated!');
+        // Re-render GraphiQL to use new headers
+        renderGraphiQL();
+      }
+    }
+    
+    function clearAuthHeader() {
+      document.getElementById('auth-token').value = '';
+      delete headers['Authorization'];
+      alert('Auth token cleared!');
+      // Re-render GraphiQL to use new headers
+      renderGraphiQL();
+    }
+
+    function graphQLFetcher(graphQLParams) {
+      return fetch('/query', {
         method: 'post',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify(graphQLParams),
       }).then(response => response.json());
+    }
 
-    ReactDOM.render(
-      React.createElement(GraphiQL, { fetcher: graphQLFetcher }),
-      document.getElementById('graphiql'),
-    );
+    function renderGraphiQL() {
+      ReactDOM.render(
+        React.createElement(GraphiQL, { fetcher: graphQLFetcher }),
+        document.getElementById('graphiql'),
+      );
+    }
+
+    // Initial render
+    renderGraphiQL();
   </script>
 </body>
 </html>

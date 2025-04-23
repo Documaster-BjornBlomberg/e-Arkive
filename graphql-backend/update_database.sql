@@ -4,6 +4,7 @@
 DROP TABLE IF EXISTS metadata;
 DROP TABLE IF EXISTS files;
 DROP TABLE IF EXISTS nodes;
+DROP TABLE IF EXISTS users;
 
 -- Create table for hierarchical nodes structure
 CREATE TABLE IF NOT EXISTS nodes (
@@ -45,3 +46,15 @@ CREATE TABLE IF NOT EXISTS metadata (
     value TEXT NOT NULL,
     FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
 );
+
+-- Create users table for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- Insert default admin user with password "admin" (using bcrypt hash)
+INSERT INTO users (username, password_hash, created_at)
+VALUES ('admin', '$2a$10$G/Yn1SqchSCfNYdN6.LYBemwy8pwMAFwFb30il2wzmkb57wgS2f6q', datetime('now'));
