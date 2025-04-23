@@ -1,34 +1,41 @@
 <template>
   <header class="header-section">
     <h1>e-Arkive</h1>
-    <nav class="nav-links">
+    <nav v-if="isAuthenticated" class="nav-links">
       <router-link to="/list" class="nav-link">Dokumentlista</router-link>
       <router-link to="/upload" class="nav-link">Ladda upp</router-link>
     </nav>
-    <button @click="toggleTheme" class="theme-toggle-btn">
-      {{ isDarkTheme ? 'Ljust Tema' : 'Mörkt Tema' }}
-    </button>
+    <div class="header-actions">
+      <button v-if="isAuthenticated" @click="handleLogout" class="logout-btn">
+        Logga ut
+      </button>
+      <button @click="toggleTheme" class="theme-toggle-btn">
+        {{ isDarkTheme ? 'Ljust Tema' : 'Mörkt Tema' }}
+      </button>
+    </div>
   </header>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useAuth } from '../../composables/useAuth';
 
-const isDarkTheme = ref(true); // Default to dark theme
+const { isAuthenticated, logout } = useAuth();
+const isDarkTheme = ref(true);
 
 const toggleTheme = () => {
   isDarkTheme.value = !isDarkTheme.value;
   const theme = isDarkTheme.value ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', theme);
-  
-  // Save preference to localStorage
   localStorage.setItem('theme', theme);
 };
 
-// Set theme on load, prioritizing saved preference if available
+const handleLogout = () => {
+  logout();
+};
+
 onMounted(() => {
-  // Check for saved theme preference
-  const savedTheme = localStorage.getItem('theme') || 'dark'; // Default to dark if none saved
+  const savedTheme = localStorage.getItem('theme') || 'dark';
   isDarkTheme.value = savedTheme === 'dark';
   document.documentElement.setAttribute('data-theme', savedTheme);
 });
@@ -40,8 +47,9 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  background-color: var(--header-bg);
+  background-color: var(--surface-color);
   color: var(--text-color);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .nav-links {
@@ -60,7 +68,12 @@ onMounted(() => {
   color: var(--button-hover-bg);
 }
 
-.theme-toggle-btn {
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.theme-toggle-btn, .logout-btn {
   background-color: var(--button-bg);
   color: var(--button-text);
   border: none;
@@ -70,7 +83,7 @@ onMounted(() => {
   transition: background-color 0.3s;
 }
 
-.theme-toggle-btn:hover {
+.theme-toggle-btn:hover, .logout-btn:hover {
   background-color: var(--button-hover-bg);
 }
 </style>

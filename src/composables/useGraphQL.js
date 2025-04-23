@@ -3,10 +3,12 @@
  * This provides a simple way to make GraphQL queries to our backend
  */
 import { ref } from 'vue';
+import { useAuth } from './useAuth';
 
 export function useGraphQL() {
   const loading = ref(false);
   const error = ref(null);
+  const { token } = useAuth();
 
   // GraphQL endpoint URL - updated to match the running server
   const endpoint = 'http://localhost:8080/query';
@@ -20,16 +22,23 @@ export function useGraphQL() {
   const executeQuery = async (query, variables = {}) => {
     loading.value = true;
     error.value = null;
-    
+
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+
+      if (token.value) {
+        headers['Authorization'] = `Bearer ${token.value}`;
+      }
+
+      console.log(`Sending GraphQL request to ${endpoint}`);
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           query,
-          variables
+          variables,
         }),
       });
 
@@ -38,7 +47,7 @@ export function useGraphQL() {
       }
 
       const result = await response.json();
-      
+
       // Check for GraphQL errors
       if (result.errors) {
         throw new Error(result.errors.map(e => e.message).join(', '));
