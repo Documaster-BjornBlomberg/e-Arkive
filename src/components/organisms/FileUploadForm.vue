@@ -4,9 +4,9 @@
       <!-- Folder panel on the left -->
       <FolderPanel
         :nodes="availableNodes"
-        :is-loading="false"
-        :expanded-node-ids="expandedNodeIds"
-        :selected-node-id="selectedNodeId"
+        :is-loading="isNodeLoading"
+        :expanded-node-ids="localExpandedNodeIds"
+        :selected-node-id="localSelectedNodeId"
         @toggle-expand="handleNodeExpand"
         @select-node="handleNodeSelect"
         @add-node="handleAddNode"
@@ -16,6 +16,17 @@
 
       <!-- Upload form on the right -->
       <div class="upload-content">
+        <!-- Selected folder path -->
+        <div class="selected-folder-path" v-if="currentNodePath.length > 0">
+          <span class="material-icons">folder</span>
+          <div class="path-segments">
+            <span v-for="(segment, index) in currentNodePath" :key="index">
+              {{ segment }}
+              <span v-if="index < currentNodePath.length - 1" class="path-separator">/</span>
+            </span>
+          </div>
+        </div>
+
         <form @submit.prevent="handleSubmit">
           <!-- File Input Area -->
           <div class="file-drop-area" @dragover.prevent="fileDragOver = true" @dragleave.prevent="fileDragOver = false" @drop.prevent="onFileDrop">
@@ -114,10 +125,34 @@ const props = defineProps({
   selectedNodeId: {
     type: String,
     default: '1' // Default to root node
+  },
+  expandedNodeIds: {
+    type: Object, // Set object
+    default: () => new Set()
   }
 });
 
-const emit = defineEmits(['upload', 'node-change']);
+const emit = defineEmits(['upload', 'node-change', 'toggle-expand']);
+
+// Local state to manage node selection and expansion
+const localSelectedNodeId = ref(props.selectedNodeId);
+const localExpandedNodeIds = ref(new Set()); // Initialize as empty set
+const isNodeLoading = ref(false);
+
+// Watch for changes in props
+watch(() => props.selectedNodeId, (newValue) => {
+  localSelectedNodeId.value = newValue;
+});
+
+watch(() => props.expandedNodeIds, (newValue) => {
+  // Only update if the sets are actually different
+  const newSet = new Set([...newValue]);
+  const localSet = new Set([...localExpandedNodeIds.value]);
+  
+  if ([...newSet].sort().join(',') !== [...localSet].sort().join(',')) {
+    localExpandedNodeIds.value = newSet;
+  }
+}, { deep: true });
 
 const selectedFile = ref(null);
 const fileDragOver = ref(false);
@@ -130,18 +165,80 @@ const metadata = ref([
 // List of allowed file types
 const allowedFileTypes = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif';
 
-// Track the selected node ID
-const selectedNodeId = ref(props.selectedNodeId);
-
-// Watch for changes in the selected node from parent
-watch(() => props.selectedNodeId, (newValue) => {
-  selectedNodeId.value = newValue;
-});
-
-// Track form validity - fixed to properly enable the upload button
+// Track form validity
 const formValid = computed(() => {
   return selectedFile.value !== null;
 });
+
+// Computed properties for folder display
+const currentNodeName = computed(() => {
+  const selectedNode = findNodeById(props.availableNodes, localSelectedNodeId.value);
+  return selectedNode?.name || '';
+});
+
+// Computed path to current node
+const currentNodePath = computed(() => {
+  const path = [];
+  let currentNode = findNodeById(props.availableNodes, localSelectedNodeId.value);
+  
+  while (currentNode) {
+    path.unshift(currentNode.name);
+    if (!currentNode.parentId) break;
+    currentNode = findNodeById(props.availableNodes, currentNode.parentId);
+  }
+  
+  return path;
+});
+
+// Helper to find node by ID
+const findNodeById = (nodes, id) => {
+  if (!nodes) return null;
+  
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children) {
+      const found = findNodeById(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+// Node handling methods
+const handleNodeExpand = (nodeId) => {
+  console.log(`FileUploadForm: Node ${nodeId} toggle expand clicked`);
+  
+  // Create a new Set to avoid directly mutating the ref value
+  const newExpandedNodeIds = new Set([...localExpandedNodeIds.value]);
+  
+  if (newExpandedNodeIds.has(nodeId)) {
+    newExpandedNodeIds.delete(nodeId);
+  } else {
+    newExpandedNodeIds.add(nodeId);
+  }
+  
+  localExpandedNodeIds.value = newExpandedNodeIds;
+  
+  // Important: Emit the toggle-expand event to the parent component to load children if needed
+  emit('toggle-expand', nodeId);
+};
+
+const handleNodeSelect = (nodeId) => {
+  localSelectedNodeId.value = nodeId;
+  emit('node-change', nodeId);
+};
+
+const handleAddNode = (nodeName, parentId) => {
+  // Implementation left to parent component 
+};
+
+const handleRenameNode = (nodeId, newName) => {
+  // Implementation left to parent component
+};
+
+const handleDeleteNode = (nodeId) => {
+  // Implementation left to parent component
+};
 
 // File type detection helper
 const getFileType = (filename) => {
@@ -210,39 +307,6 @@ const removeMetadata = (index) => {
   }
 };
 
-// Add new refs for FolderPanel
-const expandedNodeIds = ref(new Set());
-const currentNodeName = computed(() => {
-  const selectedNode = props.availableNodes.find(node => node.id === selectedNodeId.value);
-  return selectedNode?.name || '';
-});
-
-// Node handling methods
-const handleNodeExpand = (nodeId) => {
-  if (expandedNodeIds.value.has(nodeId)) {
-    expandedNodeIds.value.delete(nodeId);
-  } else {
-    expandedNodeIds.value.add(nodeId);
-  }
-};
-
-const handleNodeSelect = (nodeId) => {
-  selectedNodeId.value = nodeId;
-  emit('node-change', nodeId);
-};
-
-const handleAddNode = (nodeName, parentId) => {
-  // TODO: Implement if needed
-};
-
-const handleRenameNode = (nodeId, newName) => {
-  // TODO: Implement if needed
-};
-
-const handleDeleteNode = (nodeId) => {
-  // TODO: Implement if needed
-};
-
 // Form submission handler
 const handleSubmit = async () => {
   if (!formValid.value || props.isUploading) return;
@@ -269,7 +333,7 @@ const handleSubmit = async () => {
       contentType: file.type,
       fileData: base64Data,
       metadata: validMetadata,
-      nodeId: selectedNodeId.value
+      nodeId: localSelectedNodeId.value
     };
 
     // Emit the upload event with the file data
@@ -493,6 +557,46 @@ const handleSubmit = async () => {
   min-height: 600px;
 }
 
+.node-tree {
+  margin-left: 12px; /* Add margin for child nodes */
+}
+
+.node-connector {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 12px;
+  height: 1px;
+  background-color: var(--border-color);
+}
+
+.node-connector::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -12px;
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-color);
+}
+
+.folder-node {
+  position: relative;
+  padding-left: 12px;
+}
+
+.selected-node-path {
+  font-size: 0.85em;
+  color: var(--text-color-secondary);
+  margin-top: 4px;
+}
+
+.selected-node-path .material-icons {
+  font-size: 16px;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+
 .upload-content {
   flex: 1;
   padding: 20px;
@@ -513,5 +617,31 @@ const handleSubmit = async () => {
 .selected-folder .material-icons {
   font-size: 16px;
   color: var(--folder-color);
+}
+
+.selected-folder-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--background-color);
+  border-radius: 4px;
+  margin-bottom: 20px;
+  color: var(--text-color);
+}
+
+.path-segments {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-separator {
+  color: var(--text-color-secondary);
+  margin: 0 4px;
 }
 </style>

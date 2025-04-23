@@ -46,9 +46,9 @@ const props = defineProps({
 
 defineEmits(['toggle-expand', 'select', 'contextmenu']);
 
-// Check if the node has children
+// Check if the node has children or potentially has children
 const hasChildren = computed(() => {
-  return props.node.children && props.node.children.length > 0;
+  return (props.node.children && props.node.children.length > 0) || props.node.hasChildren === true;
 });
 </script>
 
@@ -75,7 +75,7 @@ const hasChildren = computed(() => {
   display: flex;
   align-items: center;
   padding: 6px 8px;
-  gap: 5px;
+  gap: 8px;
 }
 
 .folder-icon {
@@ -89,6 +89,7 @@ const hasChildren = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-color);
+  font-size: 0.95rem;
 }
 
 .expand-icon {
@@ -99,6 +100,12 @@ const hasChildren = computed(() => {
   justify-content: center;
   font-size: 10px;
   color: var(--text-color-secondary);
+  border-radius: 3px;
+  transition: transform 0.2s ease;
+}
+
+.expanded .expand-icon {
+  transform: rotate(90deg);
 }
 
 .expand-icon.placeholder {
@@ -106,11 +113,12 @@ const hasChildren = computed(() => {
 }
 
 .file-count {
-  background-color: rgba(128, 128, 128, 0.2);
-  color: var(--text-color-secondary);
+  background-color: var(--primary-color-light-transparent);
+  color: var(--text-color);
   border-radius: 10px;
-  padding: 1px 6px;
-  font-size: 11px;
-  margin-left: 5px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  min-width: 24px;
+  text-align: center;
 }
 </style>

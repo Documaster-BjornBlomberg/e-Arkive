@@ -384,16 +384,19 @@ onUnmounted(() => {
 }
 
 .node-tree-item {
+  position: relative;
   margin-bottom: 2px;
 }
 
+/* Removed the ::before and ::after pseudo-elements for lines */
+
 .node-tree-level {
   width: 100%;
+  /* Padding is handled dynamically in the template */
 }
 
-.node-children {
-  padding-left: 20px; /* Indent child nodes */
-}
+/* Styles related to node children indentation if needed, but likely handled by NodeTree component's level prop */
+/* .node-children { ... } */
 
 .loading-state, .empty-state {
   display: flex;

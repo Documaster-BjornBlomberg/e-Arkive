@@ -9,7 +9,9 @@
           :is-uploading="uploading"
           :available-nodes="availableNodes"
           :selected-node-id="selectedNodeId"
-          @node-change="handleNodeChange" />
+          :expanded-node-ids="expandedNodeIds"
+          @node-change="handleNodeChange"
+          @toggle-expand="handleNodeExpand" />
         
         <div v-if="statusMessage" 
              :class="['upload-status', { 'success': isSuccess, 'error': !isSuccess }]">
@@ -32,7 +34,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import MainLayout from '../templates/MainLayout.vue';
 import FileUploadForm from '../organisms/FileUploadForm.vue';
@@ -42,8 +44,16 @@ import { useGraphQL } from '../../composables/useGraphQL';
 import { useNodeHandling } from '../../composables/useNodeHandling';
 
 const { saveFile } = useGraphQL();
-// Updated to use the new function for fetching all nodes
-const { getAllNodesForUpload } = useNodeHandling(); 
+const { 
+  getRootNodes, 
+  getChildNodes 
+} = useGraphQL();
+
+const { 
+  fetchRootNodes, 
+  fetchNodeChildren, 
+  getAllNodesForUpload 
+} = useNodeHandling(); 
 
 const router = useRouter();
 const uploading = ref(false);
@@ -52,31 +62,93 @@ const statusMessage = ref('');
 const isSuccess = ref(true);
 const availableNodes = ref([]);
 const selectedNodeId = ref('1'); // Default to root node
+const expandedNodeIds = ref(new Set()); // Start with an empty Set so no nodes are expanded
 
-// Navigate to the file list page
-const navigateToList = () => {
-  router.push('/');
+// Handle node expansion toggle
+const handleNodeExpand = async (nodeId) => {
+  // Create a new Set to avoid directly mutating the ref value
+  const newExpandedNodeIds = new Set([...expandedNodeIds.value]);
+  
+  if (newExpandedNodeIds.has(nodeId)) {
+    newExpandedNodeIds.delete(nodeId);
+  } else {
+    newExpandedNodeIds.add(nodeId);
+    
+    // Load child nodes if needed
+    const node = findNodeById(availableNodes.value, nodeId);
+    if (node && (!node.children || node.children.length === 0) && node.hasChildren) {
+      await loadNodeChildren(nodeId);
+    }
+  }
+  
+  expandedNodeIds.value = newExpandedNodeIds;
 };
 
-// Reset the form for another upload
-const resetUpload = () => {
-  uploadedFile.value = null;
-  statusMessage.value = '';
+// Find a node by ID in the node tree
+const findNodeById = (nodes, id) => {
+  if (!nodes) return null;
+  
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children) {
+      const found = findNodeById(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
 };
 
-// Handle node selection change
+// Load children for a specific node and update the node structure
+const loadNodeChildren = async (nodeId) => {
+  try {
+    console.log(`Loading children for node ${nodeId}`);
+    const children = await getChildNodes(nodeId);
+    
+    if (children && children.length > 0) {
+      // Mark each child node with hasChildren property and empty children array
+      for (const childNode of children) {
+        childNode.hasChildren = true; // Assume all nodes might have children until checked
+        childNode.children = []; // Initialize empty children array
+      }
+      
+      // Update the node in the tree to include its children
+      const node = findNodeById(availableNodes.value, nodeId);
+      if (node) {
+        node.children = children;
+        // Force reactivity update by creating a new array reference
+        availableNodes.value = [...availableNodes.value];
+        console.log(`Updated node ${nodeId} with children:`, children);
+      } else {
+        console.warn(`Could not find node ${nodeId} in availableNodes`);
+      }
+      return children;
+    } else {
+      console.log(`No children found for node ${nodeId}`);
+      // If no children, update the node to indicate it has no children
+      const node = findNodeById(availableNodes.value, nodeId);
+      if (node) {
+        node.hasChildren = false;
+        // Force reactivity update
+        availableNodes.value = [...availableNodes.value];
+      }
+      return [];
+    }
+  } catch (error) {
+    console.error(`Error loading children for node ${nodeId}:`, error);
+    return [];
+  }
+};
+
 const handleNodeChange = (nodeId) => {
   selectedNodeId.value = nodeId;
 };
 
-// Handle file upload
 const handleUpload = async (fileData) => {
   uploading.value = true;
   statusMessage.value = 'Laddar upp dokument...';
   isSuccess.value = true;
   
   try {
-    // Add the selected node ID to the upload data
     if (selectedNodeId.value) {
       fileData.nodeId = selectedNodeId.value;
     }
@@ -93,17 +165,43 @@ const handleUpload = async (fileData) => {
   }
 };
 
-// Initialize available nodes for the dropdown using the recursive fetch
+// Initialize and load the nodes
 const loadAvailableNodes = async () => {
   try {
-    // Fetch all nodes recursively and format them for the dropdown
-    availableNodes.value = await getAllNodesForUpload(); 
+    // First, fetch the root nodes directly
+    const rootNodesResult = await getRootNodes();
+    if (rootNodesResult && rootNodesResult.length > 0) {
+      // For each root node, check if it has children by querying for its children
+      for (const node of rootNodesResult) {
+        // Mark that this node might have children (will be loaded when expanded)
+        node.hasChildren = true;
+        node.children = []; // Initialize empty children array
+      }
+      
+      availableNodes.value = rootNodesResult;
+      console.log("Root nodes loaded:", rootNodesResult);
+    } else {
+      console.warn("No root nodes returned from getRootNodes");
+      availableNodes.value = [];
+    }
   } catch (error) {
-    console.error('Error loading all nodes for upload:', error);
+    console.error('Error loading root nodes:', error);
+    availableNodes.value = [];
   }
 };
 
-// Load nodes when component is mounted
+// Reset upload form
+const resetUpload = () => {
+  uploadedFile.value = null;
+  statusMessage.value = '';
+};
+
+// Navigate to list page
+const navigateToList = () => {
+  router.push('/list');
+};
+
+// Initialize when component is mounted
 onMounted(async () => {
   await loadAvailableNodes();
 });
