@@ -8,6 +8,7 @@ import (
 	"graphql-backend/graph/model"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -194,6 +195,24 @@ type nodeResolver struct{ *Resolver }
 type fileResolver struct{ *Resolver }
 type userResolver struct{ *Resolver }
 
+// TokenBlacklist is a map to store invalidated tokens
+var TokenBlacklist = make(map[string]bool)
+var tokenBlacklistMutex sync.Mutex
+
+// IsTokenBlacklisted checks if a token is in the blacklist
+func IsTokenBlacklisted(token string) bool {
+	tokenBlacklistMutex.Lock()
+	defer tokenBlacklistMutex.Unlock()
+	return TokenBlacklist[token]
+}
+
+// BlacklistToken adds a token to the blacklist
+func BlacklistToken(token string) {
+	tokenBlacklistMutex.Lock()
+	defer tokenBlacklistMutex.Unlock()
+	TokenBlacklist[token] = true
+}
+
 func generateJWT(userID, username string) (string, error) {
 	// Create a new JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -213,7 +232,13 @@ func generateJWT(userID, username string) (string, error) {
 	return tokenString, nil
 }
 
+// validateJWT validates the JWT token and checks if it's blacklisted
 func validateJWT(tokenString string) (jwt.MapClaims, error) {
+	// Check if token is blacklisted
+	if IsTokenBlacklisted(tokenString) {
+		return nil, fmt.Errorf("token has been invalidated")
+	}
+
 	// Parse the token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Validate the signing method

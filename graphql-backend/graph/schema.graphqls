@@ -64,6 +64,7 @@ type Mutation {
   updateNode(id: ID!, input: NodeUpdateInput!): Node!
   deleteNode(id: ID!): Boolean!
   login(username: String!, password: String!): AuthPayload!
+  logout(token: String!): Boolean!
   register(username: String!, password: String!): AuthPayload!
   updatePassword(currentPassword: String!, newPassword: String!): Boolean!
   saveUserSetting(key: String!, value: String!): UserSetting!

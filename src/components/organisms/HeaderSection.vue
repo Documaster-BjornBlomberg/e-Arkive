@@ -16,12 +16,17 @@
       </router-link>
     </nav>
     <div class="header-actions">
+      <div v-if="isAuthenticated" class="user-info">
+        <span class="material-icons">person</span>
+        <span class="username">{{ user?.username || 'Användare' }}</span>
+      </div>
       <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'light' ? 'Växla till mörkt läge' : 'Växla till ljust läge'">
         <span v-if="currentTheme === 'light'" class="material-icons">dark_mode</span>
         <span v-else class="material-icons">light_mode</span>
       </button>
       <button v-if="isAuthenticated" @click="handleLogout" class="logout-btn">
-        Logga ut
+        <span class="material-icons">logout</span>
+        <span>Logga ut</span>
       </button>
     </div>
   </header>
@@ -38,13 +43,11 @@ defineProps({
   }
 });
 
-const { isAuthenticated } = useAuth();
+const { isAuthenticated, user, logout } = useAuth();
 const { currentTheme, toggleTheme } = useTheme();
 
-const emit = defineEmits(['logout']);
-
-const handleLogout = () => {
-  emit('logout');
+const handleLogout = async () => {
+  await logout();
 };
 </script>
 
@@ -106,6 +109,9 @@ const handleLogout = () => {
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .logout-btn:hover {
@@ -132,5 +138,19 @@ const handleLogout = () => {
 
 .material-icons {
   font-size: 22px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.username {
+  font-weight: 500;
 }
 </style>

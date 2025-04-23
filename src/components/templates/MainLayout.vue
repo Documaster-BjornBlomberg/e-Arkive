@@ -19,12 +19,12 @@ import HeaderSection from '../organisms/HeaderSection.vue';
 const { checkAuth, logout } = useAuth();
 const { loadTheme, isLoading: themeLoading } = useTheme();
 
-const handleLogout = () => {
-  logout();
+const handleLogout = async () => {
+  await logout();
 };
 
-onMounted(() => {
-  checkAuth();
+onMounted(async () => {
+  await checkAuth();
   loadTheme();
 });
 </script>
@@ -47,21 +47,21 @@ onMounted(() => {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.4);
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.7);
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   z-index: 1000;
 }
 
 .theme-loading-spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid var(--surface-color);
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-left-color: var(--button-bg);
   border-radius: 50%;
-  border-top-color: var(--button-bg);
   animation: spin 1s linear infinite;
 }
 

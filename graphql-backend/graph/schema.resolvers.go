@@ -609,6 +609,28 @@ func (r *mutationResolver) Login(ctx context.Context, username string, password 
 	}, nil
 }
 
+// Logout is the resolver for the logout field.
+func (r *mutationResolver) Logout(ctx context.Context, token string) (bool, error) {
+	logAction("Logout request received")
+
+	// Parse and validate the token first to ensure it's a valid token
+	_, err := validateJWT(token)
+	if err != nil {
+		// If token is already invalid, we consider logout successful
+		if err.Error() == "token has been invalidated" {
+			return true, nil
+		}
+		log.Printf("Error validating token during logout: %v", err)
+		return false, fmt.Errorf("invalid token")
+	}
+
+	// Add the token to the blacklist
+	BlacklistToken(token)
+	log.Printf("Successfully invalidated token")
+
+	return true, nil
+}
+
 // Register is the resolver for the register field.
 func (r *mutationResolver) Register(ctx context.Context, username string, password string) (*model.AuthPayload, error) {
 	logAction(fmt.Sprintf("Registration attempt for user: %s", username))
@@ -1216,13 +1238,3 @@ func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type todoResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
-/*
-
- */
