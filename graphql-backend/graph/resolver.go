@@ -192,6 +192,7 @@ func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error
 
 type nodeResolver struct{ *Resolver }
 type fileResolver struct{ *Resolver }
+type userResolver struct{ *Resolver }
 
 func generateJWT(userID, username string) (string, error) {
 	// Create a new JWT token
@@ -320,4 +321,65 @@ func GetAuthToken(ctx context.Context) (string, bool) {
 	}
 
 	return token, true
+}
+
+func (r *userResolver) Settings(ctx context.Context, obj *model.User) ([]*model.UserSetting, error) {
+	logAction(fmt.Sprintf("Fetching settings for user: %s", obj.ID))
+
+	// Query the database for all settings for this user
+	rows, err := r.DB.Query(`
+		SELECT id, key, value, created_at, updated_at
+		FROM user_settings
+		WHERE user_id = ?
+		ORDER BY key ASC
+	`, obj.ID)
+
+	if err != nil {
+		log.Printf("Error fetching user settings: %v", err)
+		return nil, fmt.Errorf("failed to fetch user settings: %v", err)
+	}
+	defer rows.Close()
+
+	var settings []*model.UserSetting
+	for rows.Next() {
+		var setting model.UserSetting
+		var createdAt, updatedAt string
+		if err := rows.Scan(&setting.ID, &setting.Key, &setting.Value, &createdAt, &updatedAt); err != nil {
+			log.Printf("Error scanning user setting row: %v", err)
+			return nil, fmt.Errorf("failed to read user settings: %v", err)
+		}
+		setting.CreatedAt = createdAt
+		setting.UpdatedAt = updatedAt
+		settings = append(settings, &setting)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating through user settings rows: %v", err)
+		return nil, fmt.Errorf("error reading user settings: %v", err)
+	}
+
+	return settings, nil
+}
+func getUserIDFromContext(ctx context.Context) (string, error) {
+	// Get the token from the context
+	token, ok := GetAuthToken(ctx)
+	if !ok {
+		return "", fmt.Errorf("not authenticated")
+	}
+
+	// Parse and validate the token
+	claims, err := validateJWT(token)
+	if err != nil {
+		log.Printf("Error validating JWT token: %v", err)
+		return "", fmt.Errorf("not authenticated")
+	}
+
+	// Get user ID from claims
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		log.Printf("Invalid token claims: user_id not found")
+		return "", fmt.Errorf("invalid authentication token")
+	}
+
+	return userID, nil
 }

@@ -6,6 +6,7 @@ import './style.css'
 import UploadPage from './components/pages/UploadPage.vue'
 import ListPage from './components/pages/ListPage.vue'
 import LoginPage from './components/pages/LoginPage.vue'
+import SettingsPage from './components/pages/SettingsPage.vue'
 
 // Define routes
 const routes = [
@@ -23,6 +24,11 @@ const routes = [
     path: '/login', 
     component: LoginPage,
     meta: { requiresAuth: false }
+  },
+  { 
+    path: '/settings', 
+    component: SettingsPage,
+    meta: { requiresAuth: true }
   },
   { path: '/', redirect: '/list' },
 ]

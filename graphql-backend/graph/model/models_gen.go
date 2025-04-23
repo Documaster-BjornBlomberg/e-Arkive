@@ -74,7 +74,16 @@ type Todo struct {
 }
 
 type User struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Username string `json:"username"`
+	ID       string         `json:"id"`
+	Name     string         `json:"name"`
+	Username string         `json:"username"`
+	Settings []*UserSetting `json:"settings,omitempty"`
+}
+
+type UserSetting struct {
+	ID        string `json:"id"`
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }

@@ -1,44 +1,42 @@
 <template>
   <header class="header-section">
-    <h1>e-Arkive</h1>
+    <h1>{{ title || 'e-Arkive' }}</h1>
     <nav v-if="isAuthenticated" class="nav-links">
       <router-link to="/list" class="nav-link">Dokumentlista</router-link>
       <router-link to="/upload" class="nav-link">Ladda upp</router-link>
+      <router-link to="/settings" class="nav-link">Inställningar</router-link>
     </nav>
     <div class="header-actions">
+      <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'light' ? 'Växla till mörkt läge' : 'Växla till ljust läge'">
+        <span v-if="currentTheme === 'light'" class="material-icons">dark_mode</span>
+        <span v-else class="material-icons">light_mode</span>
+      </button>
       <button v-if="isAuthenticated" @click="handleLogout" class="logout-btn">
         Logga ut
-      </button>
-      <button @click="toggleTheme" class="theme-toggle-btn">
-        {{ isDarkTheme ? 'Ljust Tema' : 'Mörkt Tema' }}
       </button>
     </div>
   </header>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
 import { useAuth } from '../../composables/useAuth';
+import { useTheme } from '../../composables/useTheme';
 
-const { isAuthenticated, logout } = useAuth();
-const isDarkTheme = ref(true);
+defineProps({
+  title: {
+    type: String,
+    default: null
+  }
+});
 
-const toggleTheme = () => {
-  isDarkTheme.value = !isDarkTheme.value;
-  const theme = isDarkTheme.value ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
-};
+const { isAuthenticated } = useAuth();
+const { currentTheme, toggleTheme } = useTheme();
+
+const emit = defineEmits(['logout']);
 
 const handleLogout = () => {
-  logout();
+  emit('logout');
 };
-
-onMounted(() => {
-  const savedTheme = localStorage.getItem('theme') || 'dark';
-  isDarkTheme.value = savedTheme === 'dark';
-  document.documentElement.setAttribute('data-theme', savedTheme);
-});
 </script>
 
 <style scoped>
@@ -71,9 +69,10 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
-.theme-toggle-btn, .logout-btn {
+.logout-btn {
   background-color: var(--button-bg);
   color: var(--button-text);
   border: none;
@@ -83,7 +82,29 @@ onMounted(() => {
   transition: background-color 0.3s;
 }
 
-.theme-toggle-btn:hover, .logout-btn:hover {
+.logout-btn:hover {
   background-color: var(--button-hover-bg);
+}
+
+.theme-toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-color);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s;
+}
+
+.theme-toggle-btn:hover {
+  background-color: var(--hover-color);
+}
+
+.material-icons {
+  font-size: 22px;
 }
 </style>

@@ -753,6 +753,83 @@ func (r *mutationResolver) UpdatePassword(ctx context.Context, currentPassword s
 	return true, nil
 }
 
+// saveUserSetting is the resolver for the saveUserSetting field
+func (r *mutationResolver) SaveUserSetting(ctx context.Context, key string, value string) (*model.UserSetting, error) {
+	logAction(fmt.Sprintf("Saving user setting: %s = %s", key, value))
+
+	// Get user ID from JWT token
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current time for timestamps
+	now := time.Now().Format(time.RFC3339)
+
+	// Try to insert or update the setting using UPSERT pattern
+	result, err := r.DB.Exec(`
+		INSERT INTO user_settings (user_id, key, value, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, key) DO UPDATE SET
+		value = ?,
+		updated_at = ?
+	`, userID, key, value, now, now, value, now)
+
+	if err != nil {
+		log.Printf("Error saving user setting: %v", err)
+		return nil, fmt.Errorf("failed to save user setting: %v", err)
+	}
+
+	// Get the ID of the inserted/updated setting
+	var settingID int64
+	if lastInsertID, err := result.LastInsertId(); err == nil && lastInsertID > 0 {
+		// If this was a new insert
+		settingID = lastInsertID
+	} else {
+		// If this was an update, query for the ID
+		err = r.DB.QueryRow("SELECT id FROM user_settings WHERE user_id = ? AND key = ?", userID, key).Scan(&settingID)
+		if err != nil {
+			log.Printf("Error retrieving setting ID: %v", err)
+			return nil, fmt.Errorf("setting was saved but failed to retrieve ID: %v", err)
+		}
+	}
+
+	return &model.UserSetting{
+		ID:        fmt.Sprintf("%d", settingID),
+		Key:       key,
+		Value:     value,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
+// deleteUserSetting is the resolver for the deleteUserSetting field
+func (r *mutationResolver) DeleteUserSetting(ctx context.Context, key string) (bool, error) {
+	logAction(fmt.Sprintf("Deleting user setting with key: %s", key))
+
+	// Get user ID from JWT token
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// Delete the setting
+	result, err := r.DB.Exec("DELETE FROM user_settings WHERE user_id = ? AND key = ?", userID, key)
+	if err != nil {
+		log.Printf("Error deleting user setting: %v", err)
+		return false, fmt.Errorf("failed to delete user setting: %v", err)
+	}
+
+	// Check if any rows were affected
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error checking rows affected: %v", err)
+		return false, fmt.Errorf("error confirming deletion: %v", err)
+	}
+
+	return rowsAffected > 0, nil
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -1042,6 +1119,83 @@ func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
 	}, nil
 }
 
+// getUserSettings is the resolver for the getUserSettings field
+func (r *queryResolver) GetUserSettings(ctx context.Context) ([]*model.UserSetting, error) {
+	logAction("Fetching current user settings")
+
+	// Get user ID from JWT token
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Query the database for all settings for this user
+	rows, err := r.DB.Query(`
+		SELECT id, key, value, created_at, updated_at
+		FROM user_settings
+		WHERE user_id = ?
+		ORDER BY key ASC
+	`, userID)
+
+	if err != nil {
+		log.Printf("Error fetching user settings: %v", err)
+		return nil, fmt.Errorf("failed to fetch user settings: %v", err)
+	}
+	defer rows.Close()
+
+	var settings []*model.UserSetting
+	for rows.Next() {
+		var setting model.UserSetting
+		var createdAt, updatedAt string
+		if err := rows.Scan(&setting.ID, &setting.Key, &setting.Value, &createdAt, &updatedAt); err != nil {
+			log.Printf("Error scanning user setting row: %v", err)
+			return nil, fmt.Errorf("failed to read user settings: %v", err)
+		}
+		setting.CreatedAt = createdAt
+		setting.UpdatedAt = updatedAt
+		settings = append(settings, &setting)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating through user settings rows: %v", err)
+		return nil, fmt.Errorf("error reading user settings: %v", err)
+	}
+
+	return settings, nil
+}
+
+// getUserSetting is the resolver for the getUserSetting field
+func (r *queryResolver) GetUserSetting(ctx context.Context, key string) (*model.UserSetting, error) {
+	logAction(fmt.Sprintf("Fetching user setting with key: %s", key))
+
+	// Get user ID from JWT token
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Query the database for the specific setting
+	var setting model.UserSetting
+	var createdAt, updatedAt string
+	err = r.DB.QueryRow(`
+		SELECT id, key, value, created_at, updated_at
+		FROM user_settings
+		WHERE user_id = ? AND key = ?
+	`, userID, key).Scan(&setting.ID, &setting.Key, &setting.Value, &createdAt, &updatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // Return nil if setting not found
+	} else if err != nil {
+		log.Printf("Error fetching user setting: %v", err)
+		return nil, fmt.Errorf("failed to fetch user setting: %v", err)
+	}
+
+	setting.CreatedAt = createdAt
+	setting.UpdatedAt = updatedAt
+
+	return &setting, nil
+}
+
 // User implementerar Todo.user
 func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
 	return &model.User{
@@ -1062,3 +1216,13 @@ func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type todoResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+
+ */

@@ -13,6 +13,15 @@ type User {
   id: ID!
   name: String!
   username: String!
+  settings: [UserSetting]
+}
+
+type UserSetting {
+  id: ID!
+  key: String!
+  value: String!
+  createdAt: String!
+  updatedAt: String!
 }
 
 type Node {
@@ -41,6 +50,8 @@ type Query {
   getChildNodes(parentId: ID!): [Node!]!
   hello: String!
   me: User
+  getUserSettings: [UserSetting]
+  getUserSetting(key: String!): UserSetting
 }
 
 type Mutation {
@@ -55,6 +66,8 @@ type Mutation {
   login(username: String!, password: String!): AuthPayload!
   register(username: String!, password: String!): AuthPayload!
   updatePassword(currentPassword: String!, newPassword: String!): Boolean!
+  saveUserSetting(key: String!, value: String!): UserSetting!
+  deleteUserSetting(key: String!): Boolean!
 }
 
 type File {

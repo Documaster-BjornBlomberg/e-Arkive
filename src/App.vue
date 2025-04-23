@@ -2,14 +2,55 @@
 import { onMounted } from 'vue';
 import { RouterView, useRouter } from 'vue-router';
 import { useAuth } from './composables/useAuth';
+import { useGraphQL } from './composables/useGraphQL';
 
 const router = useRouter();
 const { isAuthenticated, checkAuth } = useAuth();
+const { executeQuery } = useGraphQL();
+
+// Load user theme preference
+const loadUserTheme = async () => {
+  try {
+    // Only try to load theme if authenticated
+    if (!isAuthenticated.value) {
+      // Use light theme as default if not authenticated
+      document.documentElement.setAttribute('data-theme', 'light');
+      return;
+    }
+
+    const query = `
+      query {
+        getUserSetting(key: "theme") {
+          key
+          value
+        }
+      }
+    `;
+    
+    const response = await executeQuery(query);
+    const themeSetting = response?.data?.getUserSetting;
+    
+    if (themeSetting && themeSetting.value) {
+      // Apply the saved theme
+      document.documentElement.setAttribute('data-theme', themeSetting.value);
+    } else {
+      // Use light theme as default if no setting found
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  } catch (error) {
+    console.error('Error loading user theme setting:', error);
+    // Use light theme as default on error
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+};
 
 // Navigation guard setup
-onMounted(() => {
+onMounted(async () => {
   // Check authentication on app mount
-  checkAuth();
+  await checkAuth();
+  
+  // Load user theme preference
+  await loadUserTheme();
   
   // Add navigation guard
   router.beforeEach((to, from, next) => {
