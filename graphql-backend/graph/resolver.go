@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"graphql-backend/graph/model"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -28,12 +29,6 @@ func NewResolver(db *sql.DB) *Resolver {
 
 // AuthTokenKey används för att lagra JWT token i context
 type authTokenKey struct{}
-
-// GetAuthToken extraherar JWT token från context
-func GetAuthToken(ctx context.Context) (string, bool) {
-	token, ok := ctx.Value(authTokenKey{}).(string)
-	return token, ok
-}
 
 // WithAuthToken lägger till JWT token i context
 func WithAuthToken(ctx context.Context, token string) context.Context {
@@ -137,9 +132,11 @@ func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]
 	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
 	return files, nil
 }
+
 func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
 	return getNodeById(ctx, r.DB, id)
 }
+
 func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
 	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
 
@@ -214,6 +211,7 @@ func generateJWT(userID, username string) (string, error) {
 
 	return tokenString, nil
 }
+
 func validateJWT(tokenString string) (jwt.MapClaims, error) {
 	// Parse the token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -238,6 +236,7 @@ func validateJWT(tokenString string) (jwt.MapClaims, error) {
 
 	return nil, fmt.Errorf("invalid token")
 }
+
 func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 	var nodes []*model.Node
 	for rows.Next() {
@@ -267,6 +266,7 @@ func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 
 	return nodes, nil
 }
+
 func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
 	// Om den nya föräldern är samma som noden själv, är det en cykel
 	if nodeID == newParentID {
@@ -299,4 +299,25 @@ func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool)
 
 	// Fortsätt rekursivt upp i hierarkin
 	return r.detectCycle(nodeID, currentParentID.String, isCycle)
+}
+
+// GetAuthToken hämtar JWT-token från context och validerar den
+func GetAuthToken(ctx context.Context) (string, bool) {
+	// Try both Authorization and Authenticate headers
+	authHeader, ok := ctx.Value("Authorization").(string)
+	if !ok || authHeader == "" {
+		// Try Authenticate header if Authorization is not present
+		authHeader, ok = ctx.Value("Authenticate").(string)
+		if !ok || authHeader == "" {
+			return "", false
+		}
+	}
+
+	// Remove "Bearer " prefix if present
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		return "", false
+	}
+
+	return token, true
 }

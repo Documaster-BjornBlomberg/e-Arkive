@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"graphql-backend/graph"
 	"log"
@@ -130,12 +131,18 @@ func main() {
 		// Extract JWT token from Authorization header
 		ctx := r.Context()
 		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			// Try Authenticate header if Authorization is not present
+			authHeader = r.Header.Get("Authenticate")
+		}
+
 		if authHeader != "" {
 			// Check if the header contains a Bearer token
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				token := strings.TrimPrefix(authHeader, "Bearer ")
-				// Add token to context
-				ctx = graph.WithAuthToken(ctx, token)
+				// Add token to context using both keys for compatibility
+				ctx = context.WithValue(ctx, "Authorization", token)
+				ctx = context.WithValue(ctx, "Authenticate", token)
 				// Create a new request with the updated context
 				r = r.WithContext(ctx)
 			}

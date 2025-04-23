@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"graphql-backend/graph/model"
 	"log"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -692,6 +693,66 @@ func (r *mutationResolver) Register(ctx context.Context, username string, passwo
 	}, nil
 }
 
+// UpdatePassword is the resolver for the updatePassword field.
+func (r *mutationResolver) UpdatePassword(ctx context.Context, currentPassword string, newPassword string) (bool, error) {
+	logAction("Attempting to update password")
+
+	// Get authorization token from context
+	authToken, ok := ctx.Value("Authorization").(string)
+	if !ok || authToken == "" {
+		log.Printf("No authorization token found in context")
+		return false, fmt.Errorf("unauthorized: missing token")
+	}
+
+	// Remove "Bearer " prefix if present
+	authToken = strings.TrimPrefix(authToken, "Bearer ")
+
+	// Get user claims from JWT token
+	claims, err := validateJWT(authToken)
+	if err != nil {
+		log.Printf("Invalid token: %v", err)
+		return false, fmt.Errorf("unauthorized: invalid token")
+	}
+
+	// Get user ID from claims
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		log.Printf("User ID not found in token claims")
+		return false, fmt.Errorf("unauthorized: invalid token claims")
+	}
+
+	// Verify current password
+	var storedHash string
+	err = r.DB.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&storedHash)
+	if err != nil {
+		log.Printf("Error fetching user password hash: %v", err)
+		return false, fmt.Errorf("internal server error")
+	}
+
+	// Compare current password with stored hash
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(currentPassword)); err != nil {
+		log.Printf("Invalid current password for user ID %s: %v", userID, err)
+		return false, fmt.Errorf("invalid current password")
+	}
+
+	// Hash the new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing new password: %v", err)
+		return false, fmt.Errorf("internal server error")
+	}
+
+	// Update the password in the database
+	_, err = r.DB.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(newHash), userID)
+	if err != nil {
+		log.Printf("Error updating password: %v", err)
+		return false, fmt.Errorf("failed to update password")
+	}
+
+	log.Printf("Successfully updated password for user ID: %s", userID)
+	return true, nil
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -1001,257 +1062,3 @@ func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type todoResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
-/*
-	func logAction(action string) {
-	log.Printf("[ACTION] %s", action)
-}
-func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]*model.File, error) {
-	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
-
-	if r.DB == nil {
-		log.Printf("Database connection is nil")
-		return nil, fmt.Errorf("internal server error: database connection is not initialized")
-	}
-
-	// Verify the node exists
-	var exists bool
-	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&exists)
-	if err != nil {
-		log.Printf("Error checking if node exists: %v", err)
-		return nil, fmt.Errorf("failed to verify node: %v", err)
-	}
-	if !exists {
-		log.Printf("Node with ID %s does not exist", nodeID)
-		return nil, fmt.Errorf("node not found")
-	}
-
-	// Query files for this specific node
-	rows, err := r.DB.Query(`
-		SELECT id, name, size, content_type, created_at, file_data
-		FROM files
-		WHERE node_id = ?
-		ORDER BY name ASC
-	`, nodeID)
-	if err != nil {
-		log.Printf("Error fetching files for node ID %s: %v", nodeID, err)
-		return nil, fmt.Errorf("failed to fetch files: %v", err)
-	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var file model.File
-		var createdAt string
-		var fileData []byte
-		if err := rows.Scan(&file.ID, &file.Name, &file.Size, &file.ContentType, &createdAt, &fileData); err != nil {
-			log.Printf("Error scanning file row: %v", err)
-			return nil, fmt.Errorf("failed to scan file row: %v", err)
-		}
-		file.CreatedAt = createdAt
-
-		// Don't send file data in listing, only metadata
-		// We'll only include the file data when explicitly downloading the file
-
-		// Set the nodeId on the file
-		file.NodeID = &nodeID
-
-		// Fetch metadata for each file
-		metaRows, err := r.DB.Query("SELECT key, value FROM metadata WHERE file_id = ?", file.ID)
-		if err != nil {
-			log.Printf("Error fetching metadata for file ID %s: %v", file.ID, err)
-			return nil, fmt.Errorf("failed to fetch metadata: %v", err)
-		}
-
-		var metadata []*model.Metadata
-		for metaRows.Next() {
-			var meta model.Metadata
-			if err := metaRows.Scan(&meta.Key, &meta.Value); err != nil {
-				log.Printf("Error scanning metadata row: %v", err)
-				metaRows.Close()
-				return nil, fmt.Errorf("failed to scan metadata row: %v", err)
-			}
-			metadata = append(metadata, &meta)
-		}
-		metaRows.Close()
-
-		file.Metadata = metadata
-		files = append(files, &file)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over file rows: %v", err)
-		return nil, fmt.Errorf("failed to iterate over file rows: %v", err)
-	}
-
-	log.Printf("Successfully fetched %d files for node ID %s", len(files), nodeID)
-	return files, nil
-}
-func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
-	return getNodeById(ctx, r.DB, id)
-}
-func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
-	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
-
-	if db == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	row := db.QueryRow(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE id = ?
-	`, id)
-
-	var node model.Node
-	var parentID sql.NullString
-	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		log.Printf("Node with ID %s not found", id)
-		return nil, fmt.Errorf("node not found")
-	} else if err != nil {
-		log.Printf("Error fetching node with ID %s: %v", id, err)
-		return nil, fmt.Errorf("failed to fetch node: %v", err)
-	}
-
-	if parentID.Valid {
-		parentIDStr := parentID.String
-		node.ParentID = &parentIDStr
-	}
-
-	// Hämta alla barn till denna nod
-	rows, err := db.Query(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, node.ID)
-	if err != nil {
-		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
-		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
-	}
-	defer rows.Close()
-
-	children, err := scanNodeRows(rows)
-	if err != nil {
-		log.Printf("Error scanning child rows: %v", err)
-		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
-	}
-
-	node.Children = children
-	return &node, nil
-}
-type nodeResolver struct{ *Resolver }
-type fileResolver struct{ *Resolver }
-func generateJWT(userID, username string) (string, error) {
-	// Create a new JWT token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  userID,
-		"username": username,
-		"exp":      time.Now().Add(time.Hour * 24 * 7).Unix(), // Token expires in 7 days
-	})
-
-	// Sign the token with the secret key
-	// In a production environment, this should be stored securely and not hardcoded
-	jwtSecret := []byte("your-256-bit-secret") // Change this to a secure secret in production
-	tokenString, err := token.SignedString(jwtSecret)
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
-}
-func validateJWT(tokenString string) (jwt.MapClaims, error) {
-	// Parse the token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Validate the signing method
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-
-		// Return the secret key
-		jwtSecret := []byte("your-256-bit-secret") // Change this to a secure secret in production
-		return jwtSecret, nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if the token is valid
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		return claims, nil
-	}
-
-	return nil, fmt.Errorf("invalid token")
-}
-func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
-	var nodes []*model.Node
-	for rows.Next() {
-		var node model.Node
-		var parentID sql.NullString
-		var createdAt, updatedAt string
-
-		if err := rows.Scan(&node.ID, &node.Name, &parentID, &createdAt, &updatedAt); err != nil {
-			log.Printf("Error scanning node row: %v", err)
-			return nil, fmt.Errorf("failed to scan node row: %v", err)
-		}
-
-		node.CreatedAt = createdAt
-		node.UpdatedAt = updatedAt
-		if parentID.Valid {
-			parentIDStr := parentID.String
-			node.ParentID = &parentIDStr
-		}
-
-		nodes = append(nodes, &node)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over node rows: %v", err)
-		return nil, fmt.Errorf("failed to iterate over node rows: %v", err)
-	}
-
-	return nodes, nil
-}
-func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
-	// Om den nya föräldern är samma som noden själv, är det en cykel
-	if nodeID == newParentID {
-		*isCycle = true
-		return nil
-	}
-
-	// Kontrollera om den nya föräldern har den aktuella noden som förfader
-	var currentParentID sql.NullString
-	err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", newParentID).Scan(&currentParentID)
-	if err == sql.ErrNoRows {
-		// Om föräldern inte finns, är det inget problem
-		*isCycle = false
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	// Om förälderns förälder är NULL, är det slutet på kedjan - ingen cykel
-	if !currentParentID.Valid {
-		*isCycle = false
-		return nil
-	}
-
-	// Om förälderns förälder är den aktuella noden, är det en cykel
-	if currentParentID.String == nodeID {
-		*isCycle = true
-		return nil
-	}
-
-	// Fortsätt rekursivt upp i hierarkin
-	return r.detectCycle(nodeID, currentParentID.String, isCycle)
-}
-*/
