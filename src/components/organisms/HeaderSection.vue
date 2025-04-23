@@ -2,9 +2,18 @@
   <header class="header-section">
     <h1>{{ title || 'e-Arkive' }}</h1>
     <nav v-if="isAuthenticated" class="nav-links">
-      <router-link to="/list" class="nav-link">Dokumentlista</router-link>
-      <router-link to="/upload" class="nav-link">Ladda upp</router-link>
-      <router-link to="/settings" class="nav-link">Inställningar</router-link>
+      <router-link to="/list" class="nav-link" active-class="active">
+        <span class="material-icons">list</span>
+        <span>Dokumentlista</span>
+      </router-link>
+      <router-link to="/upload" class="nav-link" active-class="active">
+        <span class="material-icons">upload</span>
+        <span>Ladda upp</span>
+      </router-link>
+      <router-link to="/settings" class="nav-link" active-class="active">
+        <span class="material-icons">settings</span>
+        <span>Inställningar</span>
+      </router-link>
     </nav>
     <div class="header-actions">
       <button class="theme-toggle-btn" @click="toggleTheme" :title="currentTheme === 'light' ? 'Växla till mörkt läge' : 'Växla till ljust läge'">
@@ -44,26 +53,43 @@ const handleLogout = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
+  padding: 15px 20px;
   background-color: var(--surface-color);
   color: var(--text-color);
   border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
 }
 
 .nav-links {
   display: flex;
-  gap: 15px;
+  gap: 10px;
+  margin: 0 20px;
 }
 
 .nav-link {
   text-decoration: none;
   color: var(--text-color);
   font-weight: bold;
-  transition: color 0.3s;
+  padding: 10px 15px;
+  border-radius: 4px 4px 0 0;
+  transition: all 0.3s;
+  border-bottom: 3px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  margin: 0 1px;
 }
 
 .nav-link:hover {
-  color: var(--button-hover-bg);
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--button-bg);
+}
+
+.nav-link.active {
+  color: var(--button-bg);
+  border-bottom-color: var(--button-bg);
+  background-color: rgba(0, 0, 0, 0.03);
 }
 
 .header-actions {
