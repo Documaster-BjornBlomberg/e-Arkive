@@ -8,11 +8,13 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
 - **Språk:** Go  
 - **Databas:** SQLite (lagras som en fil)  
 - **API:** GraphQL (med hjälp av `gqlgen`)
+- **Autentisering:** JWT (JSON Web Tokens)
 
 ### Funktioner
 - Hanterar filuppladdningar och metadata.  
 - Använder SQLite som en lättviktig databas.  
 - Tillhandahåller ett GraphQL API för frontend-kommunikation.
+- Stödjer användarautentisering och behörighetshantering.
 
 ### Hur man startar backend
 1. Öppna en terminal i projektmappen `~\e-Arkive\graphql-backend`.
@@ -25,6 +27,135 @@ e-Arkive är en arkivapplikation som består av en backend och en frontend. Appl
    go run .
    ```
 4. Backend körs på `http://localhost:8080`. Du kan använda GraphQL Playground på `http://localhost:8080/sandbox`.
+
+### Autentisering och användarhantering
+
+e-Arkive använder ett JWT-baserat (JSON Web Token) autentiseringssystem med följande funktioner:
+
+#### Användarkonton
+- **Standardanvändare:** Systemet levereras med en fördefinierad admin-användare (användarnamn: `admin`, lösenord: `admin`)
+- **Registrering:** Nya användare kan registrera sig via API:et med ett användarnamn och lösenord
+- **Lösenordshantering:** Lösenord lagras säkert med bcrypt-hashing
+- **Användargrupper:** Användare kan tillhöra grupper för behörighetshantering
+
+#### Autentiseringsflöde
+1. **Inloggning:** Användaren skickar användarnamn och lösenord till `/query`-endpunkten
+2. **Token-generering:** Vid framgångsrik inloggning genererar servern en JWT som är giltig i 7 dagar
+3. **Auktorisering:** Efterföljande API-anrop inkluderar token i Authorization-headern (`Bearer <token>`)
+4. **Utloggning:** Tokens kan ogiltigförklaras vid utloggning genom att lägga till dem i en svartlista
+
+#### Behörighetsmodell
+e-Arkive använder en nodbaserad hierarkisk behörighetsmodell:
+
+- **Binära behörigheter:** Rättigheter representeras som binära flaggor
+   - READ (1): Rätt att läsa/visa en nod och dess innehåll
+   - MODIFY (2): Rätt att ändra en nod eller dess innehåll
+   - DELETE (4): Rätt att ta bort en nod eller dess innehåll
+
+- **Behörighetsnivåer:**
+   - **Nodens ägare:** Har alltid fulla rättigheter (7 = läs + ändra + ta bort)
+   - **Gruppmedlemmar:** Om noden ägs av en grupp, ärver gruppens medlemmar nodens behörigheter
+   - **Övriga användare:** Har de behörigheter som är definierade i nodens permissions-fält
+
+### Noder och filsystem
+
+e-Arkive organiserar innehåll i en hierarkisk nodstruktur:
+
+- **Root-nod:** Systemet har en rotnod som fungerar som utgångspunkt i hierarkin
+- **Noder:** En nod kan representera en mapp i filsystemet
+- **Filer:** Filer kan kopplas till noder och innehålla metadata
+- **Behörigheter:** Varje nod har specifika behörighetsinställningar
+
+### Testa API:et
+
+För att testa GraphQL API:et kan du använda det inbyggda webbgränssnittet:
+
+1. Öppna `http://localhost:8080/sandbox` i en webbläsare
+2. Utför inloggning för att få en token:
+   ```graphql
+   mutation {
+     login(username: "admin", password: "admin") {
+       token
+       user {
+         id
+         username
+       }
+     }
+   }
+   ```
+3. Kopiera den returnerade token och klicka på "Headers" längst ned:
+   ```json
+   {
+     "Authorization": "Bearer ditt_token_här"
+   }
+   ```
+4. Nu kan du utföra auktoriserade anrop, till exempel:
+   ```graphql
+   query {
+     me {
+       id
+       username
+     }
+   }
+   ```
+
+#### Exempel på API-anrop
+
+**Hämta användarens inställningar:**
+```graphql
+query {
+  getUserSettings {
+    key
+    value
+  }
+}
+```
+
+**Hämta filhierarkin:**
+```graphql
+query {
+  getRootNodes {
+    id
+    name
+    children {
+      id
+      name
+    }
+  }
+}
+```
+
+**Ladda upp en fil:**
+```graphql
+mutation {
+  saveFile(input: {
+    name: "exempel.txt",
+    size: 123,
+    contentType: "text/plain",
+    fileData: "base64kodad_fildata",
+    metadata: [
+      { key: "author", value: "Anders Andersson" },
+      { key: "description", value: "Exempelfil" }
+    ],
+    nodeId: "1"
+  }) {
+    id
+    name
+  }
+}
+```
+
+### Databasstruktur
+
+e-Arkive använder SQLite för att lagra alla data. Huvudtabellerna är:
+
+- **users:** Användarinformation och inloggningsuppgifter
+- **user_settings:** Användarspecifika inställningar (t.ex. tema)
+- **groups:** Användargrupper för behörighetshantering
+- **group_members:** Kopplingar mellan användare och grupper
+- **nodes:** Hierarkisk struktur som representerar mappträdet
+- **files:** Filinformation och binärdata
+- **metadata:** Metadata kopplad till filer som nyckel-värde-par
 
 ## Frontend
 
