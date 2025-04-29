@@ -48,6 +48,20 @@ type fileResolver struct{ *Resolver }
 type userResolver struct{ *Resolver }
 
 // =============================================
+// ========== PERMISSIONS CONSTANTS ==========
+// =============================================
+
+// Permission bit masks
+const (
+	PERM_VIEW             = 1  // 000001 - Can see the node
+	PERM_MODIFY           = 2  // 000010 - Can modify the node (name, etc.)
+	PERM_DELETE           = 4  // 000100 - Can delete the node
+	PERM_VIEW_PERMISSIONS = 8  // 001000 - Can see user permissions
+	PERM_MODIFY_USER      = 16 // 010000 - Can modify user groups, names, passwords
+	PERM_MANAGE_USER      = 32 // 100000 - Can delete/create users
+)
+
+// =============================================
 // ========== GLOBALA VARIABLER ==============
 // =============================================
 
@@ -74,26 +88,140 @@ func logAction(action string) {
 }
 
 // =============================================
-// ========== NODE FUNKTIONER ===============
+// ========== PERMISSIONS FUNCTIONS ==========
 // =============================================
 
-// getNodeById hämtar en nod från databasen baserat på ID
-func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
-	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
+// getUserGroups returns all groups that a user belongs to
+func getUserGroups(ctx context.Context, db *sql.DB, userID string) ([]*model.Group, error) {
+	logAction(fmt.Sprintf("Fetching groups for user ID: %s", userID))
 
+	rows, err := db.Query(`
+		SELECT g.id, g.name
+		FROM groups g
+		JOIN group_members gm ON g.id = gm.group_id
+		WHERE gm.user_id = ?
+		ORDER BY g.name ASC
+	`, userID)
+	if err != nil {
+		log.Printf("Error fetching user groups: %v", err)
+		return nil, fmt.Errorf("failed to fetch user groups: %v", err)
+	}
+	defer rows.Close()
+
+	var groups []*model.Group
+	for rows.Next() {
+		var group model.Group
+		if err := rows.Scan(&group.ID, &group.Name); err != nil {
+			log.Printf("Error scanning group row: %v", err)
+			return nil, fmt.Errorf("failed to scan group row: %v", err)
+		}
+		groups = append(groups, &group)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over group rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over group rows: %v", err)
+	}
+
+	return groups, nil
+}
+
+// checkPermission checks if a user has the specified permission for a node
+func checkPermission(ctx context.Context, db *sql.DB, nodeID string, permissionBit int) (bool, error) {
+	// Get user ID from JWT token
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// First, check if the user is an admin
+	var isAdmin bool
+	err = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return false, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if isAdmin {
+		// Admins have all permissions
+		return true, nil
+	}
+
+	// Check if the user is the owner of the node
+	var hasPermission bool
+	err = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM nodes 
+			WHERE id = ? AND owner_user_id = ? AND (permissions & ?) > 0
+		)
+	`, nodeID, userID, permissionBit).Scan(&hasPermission)
+
+	if err != nil {
+		log.Printf("Error checking node ownership permission: %v", err)
+		return false, fmt.Errorf("failed to check node ownership: %v", err)
+	}
+
+	if hasPermission {
+		return true, nil
+	}
+
+	// Check if the user is in a group that has the required permission
+	err = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM nodes n
+			JOIN group_members gm ON n.owner_group_id = gm.group_id
+			WHERE n.id = ? AND gm.user_id = ? AND (n.permissions & ?) > 0
+		)
+	`, nodeID, userID, permissionBit).Scan(&hasPermission)
+
+	if err != nil {
+		log.Printf("Error checking group permission: %v", err)
+		return false, fmt.Errorf("failed to check group permission: %v", err)
+	}
+
+	return hasPermission, nil
+}
+
+// getNodeWithPermissions fetches a node and checks if the user has permission to view it
+func getNodeWithPermissions(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is not initialized")
 	}
 
+	// First check if the user has permission to view this node
+	hasPermission, err := checkPermission(ctx, db, id, PERM_VIEW)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot view this node")
+	}
+
+	// Query the node with ownership and permission information
 	row := db.QueryRow(`
-		SELECT id, name, parent_id, created_at, updated_at
+		SELECT id, name, parent_id, owner_user_id, owner_group_id, permissions, created_at, updated_at
 		FROM nodes
 		WHERE id = ?
 	`, id)
 
 	var node model.Node
 	var parentID sql.NullString
-	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
+	var ownerUserID sql.NullString
+	var ownerGroupID sql.NullString
+
+	err = row.Scan(&node.ID, &node.Name, &parentID, &ownerUserID, &ownerGroupID,
+		&node.Permissions, &node.CreatedAt, &node.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		log.Printf("Node with ID %s not found", id)
@@ -103,32 +231,148 @@ func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error
 		return nil, fmt.Errorf("failed to fetch node: %v", err)
 	}
 
+	// Set nullable fields
 	if parentID.Valid {
 		parentIDStr := parentID.String
 		node.ParentID = &parentIDStr
 	}
 
-	// Hämta alla barn till denna nod
-	rows, err := db.Query(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, node.ID)
+	if ownerUserID.Valid {
+		ownerUserIDStr := ownerUserID.String
+		node.OwnerUserID = &ownerUserIDStr
+	}
+
+	if ownerGroupID.Valid {
+		ownerGroupIDStr := ownerGroupID.String
+		node.OwnerGroupID = &ownerGroupIDStr
+	}
+
+	return &node, nil
+}
+
+// getChildNodesWithPermissions fetches all child nodes of a parent that the user has permission to view
+func getChildNodesWithPermissions(ctx context.Context, db *sql.DB, parentID string) ([]*model.Node, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	// First check if the parent node exists
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", parentID).Scan(&exists)
 	if err != nil {
-		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
-		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
+		log.Printf("Error checking if parent node exists: %v", err)
+		return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+	}
+
+	if !exists {
+		log.Printf("Parent node with ID %s does not exist", parentID)
+		return nil, fmt.Errorf("parent node not found")
+	}
+
+	// Get the user ID from context
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the user is an admin
+	var isAdmin bool
+	err = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	var rows *sql.Rows
+
+	if isAdmin {
+		// Admins can see all nodes
+		rows, err = db.Query(`
+			SELECT id, name, parent_id, owner_user_id, owner_group_id, permissions, created_at, updated_at 
+			FROM nodes 
+			WHERE parent_id = ?
+			ORDER BY name ASC
+		`, parentID)
+	} else {
+		// Regular users can only see nodes they have permission to view
+		rows, err = db.Query(`
+			SELECT n.id, n.name, n.parent_id, n.owner_user_id, n.owner_group_id, n.permissions, n.created_at, n.updated_at 
+			FROM nodes n
+			WHERE n.parent_id = ? AND (
+				(n.owner_user_id = ? AND (n.permissions & ?) > 0) OR
+				EXISTS (
+					SELECT 1 
+					FROM group_members gm 
+					WHERE gm.user_id = ? AND gm.group_id = n.owner_group_id AND (n.permissions & ?) > 0
+				)
+			)
+			ORDER BY n.name ASC
+		`, parentID, userID, PERM_VIEW, userID, PERM_VIEW)
+	}
+
+	if err != nil {
+		log.Printf("Error fetching child nodes: %v", err)
+		return nil, fmt.Errorf("failed to fetch child nodes: %v", err)
 	}
 	defer rows.Close()
 
-	children, err := scanNodeRows(rows)
-	if err != nil {
-		log.Printf("Error scanning child rows: %v", err)
-		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
+	var nodes []*model.Node
+	for rows.Next() {
+		var node model.Node
+		var pID sql.NullString
+		var ownerUserID sql.NullString
+		var ownerGroupID sql.NullString
+
+		err := rows.Scan(&node.ID, &node.Name, &pID, &ownerUserID, &ownerGroupID,
+			&node.Permissions, &node.CreatedAt, &node.UpdatedAt)
+
+		if err != nil {
+			log.Printf("Error scanning node: %v", err)
+			return nil, fmt.Errorf("failed to process node data: %v", err)
+		}
+
+		if pID.Valid {
+			parentIDStr := pID.String
+			node.ParentID = &parentIDStr
+		}
+
+		if ownerUserID.Valid {
+			ownerUserIDStr := ownerUserID.String
+			node.OwnerUserID = &ownerUserIDStr
+		}
+
+		if ownerGroupID.Valid {
+			ownerGroupIDStr := ownerGroupID.String
+			node.OwnerGroupID = &ownerGroupIDStr
+		}
+
+		nodes = append(nodes, &node)
 	}
 
-	node.Children = children
-	return &node, nil
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating through rows: %v", err)
+		return nil, fmt.Errorf("error processing results: %v", err)
+	}
+
+	return nodes, nil
+}
+
+// =============================================
+// ========== NODE FUNKTIONER ===============
+// =============================================
+
+// getNodeById hämtar en nod från databasen baserat på ID
+func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
+	// Use the new function that includes permissions
+	return getNodeWithPermissions(ctx, db, id)
 }
 
 // scanNodeRows läser noddata från SQL-rader och konverterar till Node-objekt
@@ -162,39 +406,45 @@ func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
 	return nodes, nil
 }
 
-// detectCycle kontrollerar om en förälder-barn relation skulle skapa en cykel i hierarkin
+// detectCycle checks if updating a node's parent would create a cycle in the node hierarchy
 func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
-	// Om den nya föräldern är samma som noden själv, är det en cykel
+	*isCycle = false
+
+	// If the new parent is the same as the node itself, it's a cycle
 	if nodeID == newParentID {
 		*isCycle = true
 		return nil
 	}
 
-	// Kontrollera om den nya föräldern har den aktuella noden som förfader
-	var currentParentID sql.NullString
-	err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", newParentID).Scan(&currentParentID)
-	if err == sql.ErrNoRows {
-		// Om föräldern inte finns, är det inget problem
-		*isCycle = false
-		return nil
-	} else if err != nil {
-		return err
+	// Check if any ancestors of the potential parent are actually the node we're moving
+	currentID := newParentID
+	for currentID != "" {
+		// If currentID ever becomes the node we're moving, we have a cycle
+		if currentID == nodeID {
+			*isCycle = true
+			return nil
+		}
+
+		// Get parent of current node
+		var parentID sql.NullString
+		err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", currentID).Scan(&parentID)
+		if err == sql.ErrNoRows {
+			// Node not found, break the loop
+			break
+		} else if err != nil {
+			return fmt.Errorf("error checking hierarchy: %v", err)
+		}
+
+		// If no parent, break the loop
+		if !parentID.Valid {
+			break
+		}
+
+		// Move up the hierarchy
+		currentID = parentID.String
 	}
 
-	// Om förälderns förälder är NULL, är det slutet på kedjan - ingen cykel
-	if !currentParentID.Valid {
-		*isCycle = false
-		return nil
-	}
-
-	// Om förälderns förälder är den aktuella noden, är det en cykel
-	if currentParentID.String == nodeID {
-		*isCycle = true
-		return nil
-	}
-
-	// Fortsätt rekursivt upp i hierarkin
-	return r.detectCycle(nodeID, currentParentID.String, isCycle)
+	return nil
 }
 
 // =============================================
@@ -210,16 +460,14 @@ func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]
 		return nil, fmt.Errorf("internal server error: database connection is not initialized")
 	}
 
-	// Verify the node exists
-	var exists bool
-	err := r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", nodeID).Scan(&exists)
+	// First check if user has permission to view this node
+	hasPermission, err := checkPermission(ctx, r.DB, nodeID, PERM_VIEW)
 	if err != nil {
-		log.Printf("Error checking if node exists: %v", err)
-		return nil, fmt.Errorf("failed to verify node: %v", err)
+		return nil, err
 	}
-	if !exists {
-		log.Printf("Node with ID %s does not exist", nodeID)
-		return nil, fmt.Errorf("node not found")
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot view files in this node")
 	}
 
 	// Query files for this specific node
@@ -379,7 +627,7 @@ func GetAuthToken(ctx context.Context) (string, bool) {
 	return token, true
 }
 
-// getUserIDFromContext hämtar användar-ID från JWT-token i context
+// getUserIDFromContext extracts user ID from the JWT token in the context
 func getUserIDFromContext(ctx context.Context) (string, error) {
 	// Get the token from the context
 	token, ok := GetAuthToken(ctx)

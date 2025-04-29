@@ -28,6 +28,12 @@ type FileInput struct {
 	NodeID      *string          `json:"nodeId,omitempty"`
 }
 
+type Group struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Members []*User `json:"members,omitempty"`
+}
+
 type Metadata struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -42,24 +48,35 @@ type Mutation struct {
 }
 
 type Node struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	ParentID  *string `json:"parentId,omitempty"`
-	CreatedAt string  `json:"createdAt"`
-	UpdatedAt string  `json:"updatedAt"`
-	Children  []*Node `json:"children,omitempty"`
-	Parent    *Node   `json:"parent,omitempty"`
-	Files     []*File `json:"files,omitempty"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	ParentID     *string `json:"parentId,omitempty"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+	Children     []*Node `json:"children,omitempty"`
+	Parent       *Node   `json:"parent,omitempty"`
+	Files        []*File `json:"files,omitempty"`
+	OwnerUserID  *string `json:"ownerUserId,omitempty"`
+	OwnerGroupID *string `json:"ownerGroupId,omitempty"`
+	OwnerUser    *User   `json:"ownerUser,omitempty"`
+	OwnerGroup   *Group  `json:"ownerGroup,omitempty"`
+	Permissions  int     `json:"permissions"`
 }
 
 type NodeInput struct {
-	Name     string  `json:"name"`
-	ParentID *string `json:"parentId,omitempty"`
+	Name         string  `json:"name"`
+	ParentID     *string `json:"parentId,omitempty"`
+	OwnerUserID  *string `json:"ownerUserId,omitempty"`
+	OwnerGroupID *string `json:"ownerGroupId,omitempty"`
+	Permissions  *int    `json:"permissions,omitempty"`
 }
 
 type NodeUpdateInput struct {
-	Name     *string `json:"name,omitempty"`
-	ParentID *string `json:"parentId,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	ParentID     *string `json:"parentId,omitempty"`
+	OwnerUserID  *string `json:"ownerUserId,omitempty"`
+	OwnerGroupID *string `json:"ownerGroupId,omitempty"`
+	Permissions  *int    `json:"permissions,omitempty"`
 }
 
 type Query struct {
@@ -78,6 +95,7 @@ type User struct {
 	Name     string         `json:"name"`
 	Username string         `json:"username"`
 	Settings []*UserSetting `json:"settings,omitempty"`
+	Groups   []*Group       `json:"groups,omitempty"`
 }
 
 type UserSetting struct {

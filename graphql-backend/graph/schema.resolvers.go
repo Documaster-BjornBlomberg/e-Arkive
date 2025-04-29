@@ -560,6 +560,67 @@ func (r *mutationResolver) DeleteNode(ctx context.Context, id string) (bool, err
 	return true, nil
 }
 
+// MoveNode moves a node to a new parent
+func (r *mutationResolver) MoveNode(ctx context.Context, id string, newParentID string) (*model.Node, error) {
+	logAction(fmt.Sprintf("Moving node %s to new parent %s", id, newParentID))
+
+	// Check if user has permission to modify this node
+	hasPermission, err := checkPermission(ctx, r.DB, id, PERM_MODIFY)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot modify this node")
+	}
+
+	// Check if user has permission to modify the new parent node
+	hasPermission, err = checkPermission(ctx, r.DB, newParentID, PERM_MODIFY)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot modify the target node")
+	}
+
+	// Check if the new parent node exists
+	var parentExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)", newParentID).Scan(&parentExists)
+	if err != nil {
+		log.Printf("Error checking if parent node exists: %v", err)
+		return nil, fmt.Errorf("failed to check if parent node exists: %v", err)
+	}
+
+	if !parentExists {
+		log.Printf("Parent node with ID %s does not exist", newParentID)
+		return nil, fmt.Errorf("parent node not found")
+	}
+
+	// Check for cycles
+	var isCycle bool
+	err = r.detectCycle(id, newParentID, &isCycle)
+	if err != nil {
+		log.Printf("Error detecting cycle: %v", err)
+		return nil, fmt.Errorf("failed to validate hierarchy: %v", err)
+	}
+
+	if isCycle {
+		log.Printf("Cannot update node: would create a cycle in the hierarchy")
+		return nil, fmt.Errorf("cannot update node: would create a cycle in the hierarchy")
+	}
+
+	// Update the node's parent
+	_, err = r.DB.Exec("UPDATE nodes SET parent_id = ? WHERE id = ?", newParentID, id)
+	if err != nil {
+		log.Printf("Error updating node parent: %v", err)
+		return nil, fmt.Errorf("failed to update node parent: %v", err)
+	}
+
+	// Get the updated node
+	return getNodeWithPermissions(ctx, r.DB, id)
+}
+
 // Login is the resolver for the login field.
 func (r *mutationResolver) Login(ctx context.Context, username string, password string) (*model.AuthPayload, error) {
 	logAction(fmt.Sprintf("Login attempt for user: %s", username))
@@ -852,6 +913,523 @@ func (r *mutationResolver) DeleteUserSetting(ctx context.Context, key string) (b
 	return rowsAffected > 0, nil
 }
 
+// CreateGroup creates a new group
+func (r *mutationResolver) CreateGroup(ctx context.Context, name string) (*model.Group, error) {
+	logAction(fmt.Sprintf("Creating group with name: %s", name))
+
+	// Only administrators can create groups
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return nil, fmt.Errorf("permission denied: must be an administrator to create groups")
+	}
+
+	// Check if group name already exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE name = ?)", name).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if group exists: %v", err)
+		return nil, fmt.Errorf("failed to check if group exists: %v", err)
+	}
+
+	if exists {
+		return nil, fmt.Errorf("group name already exists")
+	}
+
+	// Create the group
+	result, err := r.DB.Exec(
+		"INSERT INTO groups (name, created_at) VALUES (?, datetime('now'))",
+		name,
+	)
+	if err != nil {
+		log.Printf("Error creating group: %v", err)
+		return nil, fmt.Errorf("failed to create group: %v", err)
+	}
+
+	groupID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Error retrieving last insert ID: %v", err)
+		return nil, fmt.Errorf("failed to retrieve group ID: %v", err)
+	}
+
+	return &model.Group{
+		ID:   fmt.Sprintf("%d", groupID),
+		Name: name,
+	}, nil
+}
+
+// UpdateGroup updates an existing group
+func (r *mutationResolver) UpdateGroup(ctx context.Context, id string, name string) (*model.Group, error) {
+	logAction(fmt.Sprintf("Updating group with ID: %s", id))
+
+	// Only administrators can update groups
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return nil, fmt.Errorf("permission denied: must be an administrator to update groups")
+	}
+
+	// Check if group exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if group exists: %v", err)
+		return nil, fmt.Errorf("failed to check if group exists: %v", err)
+	}
+
+	if !exists {
+		return nil, fmt.Errorf("group not found")
+	}
+
+	// Check if this is the Administrators group - don't allow renaming it
+	var currentName string
+	err = r.DB.QueryRow("SELECT name FROM groups WHERE id = ?", id).Scan(&currentName)
+	if err != nil {
+		log.Printf("Error fetching group name: %v", err)
+		return nil, fmt.Errorf("failed to fetch group name: %v", err)
+	}
+
+	if currentName == "Administrators" {
+		return nil, fmt.Errorf("cannot rename the Administrators group")
+	}
+
+	// Check if new name already exists
+	var nameExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE name = ? AND id != ?)", name, id).Scan(&nameExists)
+	if err != nil {
+		log.Printf("Error checking if group name exists: %v", err)
+		return nil, fmt.Errorf("failed to check if group name exists: %v", err)
+	}
+
+	if nameExists {
+		return nil, fmt.Errorf("group name already exists")
+	}
+
+	// Update the group
+	_, err = r.DB.Exec(
+		"UPDATE groups SET name = ? WHERE id = ?",
+		name, id,
+	)
+	if err != nil {
+		log.Printf("Error updating group: %v", err)
+		return nil, fmt.Errorf("failed to update group: %v", err)
+	}
+
+	return &model.Group{
+		ID:   id,
+		Name: name,
+	}, nil
+}
+
+// DeleteGroup deletes a group
+func (r *mutationResolver) DeleteGroup(ctx context.Context, id string) (bool, error) {
+	logAction(fmt.Sprintf("Deleting group with ID: %s", id))
+
+	// Only administrators can delete groups
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return false, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return false, fmt.Errorf("permission denied: must be an administrator to delete groups")
+	}
+
+	// Check if group exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if group exists: %v", err)
+		return false, fmt.Errorf("failed to check if group exists: %v", err)
+	}
+
+	if !exists {
+		return false, fmt.Errorf("group not found")
+	}
+
+	// Check if this is the Administrators group - don't allow deleting it
+	var groupName string
+	err = r.DB.QueryRow("SELECT name FROM groups WHERE id = ?", id).Scan(&groupName)
+	if err != nil {
+		log.Printf("Error fetching group name: %v", err)
+		return false, fmt.Errorf("failed to fetch group name: %v", err)
+	}
+
+	if groupName == "Administrators" {
+		return false, fmt.Errorf("cannot delete the Administrators group")
+	}
+
+	// Remove all members from the group and then delete it
+	tx, err := r.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		return false, fmt.Errorf("failed to start transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete group memberships
+	_, err = tx.Exec("DELETE FROM group_members WHERE group_id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting group memberships: %v", err)
+		return false, fmt.Errorf("failed to delete group memberships: %v", err)
+	}
+
+	// Delete group
+	result, err := tx.Exec("DELETE FROM groups WHERE id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting group: %v", err)
+		return false, fmt.Errorf("failed to delete group: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		tx.Rollback()
+		return false, fmt.Errorf("error confirming deletion: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		tx.Rollback()
+		return false, fmt.Errorf("group not found")
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return false, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return true, nil
+}
+
+// AddUserToGroup adds a user to a group
+func (r *mutationResolver) AddUserToGroup(ctx context.Context, userID string, groupID string) (bool, error) {
+	logAction(fmt.Sprintf("Adding user %s to group %s", userID, groupID))
+
+	// Only administrators can manage group memberships
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, currentUserID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return false, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return false, fmt.Errorf("permission denied: must be an administrator to manage group memberships")
+	}
+
+	// Check if user and group exist
+	var userExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&userExists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return false, fmt.Errorf("failed to check if user exists: %v", err)
+	}
+
+	if !userExists {
+		return false, fmt.Errorf("user not found")
+	}
+
+	var groupExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?)", groupID).Scan(&groupExists)
+	if err != nil {
+		log.Printf("Error checking if group exists: %v", err)
+		return false, fmt.Errorf("failed to check if group exists: %v", err)
+	}
+
+	if !groupExists {
+		return false, fmt.Errorf("group not found")
+	}
+
+	// Check if user is already in the group
+	var memberExists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?)", userID, groupID).Scan(&memberExists)
+	if err != nil {
+		log.Printf("Error checking if membership exists: %v", err)
+		return false, fmt.Errorf("failed to check if membership exists: %v", err)
+	}
+
+	if memberExists {
+		// User is already in the group, consider this a success
+		return true, nil
+	}
+
+	// Add user to group
+	_, err = r.DB.Exec(
+		"INSERT INTO group_members (user_id, group_id, created_at) VALUES (?, ?, datetime('now'))",
+		userID, groupID,
+	)
+	if err != nil {
+		log.Printf("Error adding user to group: %v", err)
+		return false, fmt.Errorf("failed to add user to group: %v", err)
+	}
+
+	return true, nil
+}
+
+// RemoveUserFromGroup removes a user from a group
+func (r *mutationResolver) RemoveUserFromGroup(ctx context.Context, userID string, groupID string) (bool, error) {
+	logAction(fmt.Sprintf("Removing user %s from group %s", userID, groupID))
+
+	// Only administrators can manage group memberships
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, currentUserID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return false, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return false, fmt.Errorf("permission denied: must be an administrator to manage group memberships")
+	}
+
+	// Special check: if this is the Administrators group, make sure we're not removing the last admin
+	var groupName string
+	err = r.DB.QueryRow("SELECT name FROM groups WHERE id = ?", groupID).Scan(&groupName)
+	if err != nil {
+		log.Printf("Error fetching group name: %v", err)
+		return false, fmt.Errorf("failed to fetch group name: %v", err)
+	}
+
+	if groupName == "Administrators" {
+		// Count admins
+		var adminCount int
+		err = r.DB.QueryRow("SELECT COUNT(*) FROM group_members WHERE group_id = ?", groupID).Scan(&adminCount)
+		if err != nil {
+			log.Printf("Error counting administrators: %v", err)
+			return false, fmt.Errorf("failed to count administrators: %v", err)
+		}
+
+		if adminCount <= 1 {
+			// Check if this is the last admin
+			var isLastAdmin bool
+			err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?)", groupID, userID).Scan(&isLastAdmin)
+			if err != nil {
+				log.Printf("Error checking if user is admin: %v", err)
+				return false, fmt.Errorf("failed to check if user is admin: %v", err)
+			}
+
+			if isLastAdmin {
+				return false, fmt.Errorf("cannot remove the last administrator")
+			}
+		}
+	}
+
+	// Remove user from group
+	result, err := r.DB.Exec(
+		"DELETE FROM group_members WHERE user_id = ? AND group_id = ?",
+		userID, groupID,
+	)
+	if err != nil {
+		log.Printf("Error removing user from group: %v", err)
+		return false, fmt.Errorf("failed to remove user from group: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		return false, fmt.Errorf("error confirming removal: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return false, fmt.Errorf("user is not a member of the group")
+	}
+
+	return true, nil
+}
+
+// SetNodePermissions sets the permissions for a node
+func (r *mutationResolver) SetNodePermissions(ctx context.Context, nodeID string, permissions int) (*model.Node, error) {
+	logAction(fmt.Sprintf("Setting permissions for node %s to %d", nodeID, permissions))
+
+	// Check if user has permission to change permissions
+	hasPermission, err := checkPermission(ctx, r.DB, nodeID, PERM_VIEW_PERMISSIONS)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot view or modify permissions for this node")
+	}
+
+	// Update the permissions
+	_, err = r.DB.Exec("UPDATE nodes SET permissions = ? WHERE id = ?", permissions, nodeID)
+	if err != nil {
+		log.Printf("Error updating node permissions: %v", err)
+		return nil, fmt.Errorf("failed to update node permissions: %v", err)
+	}
+
+	// Get the updated node
+	return getNodeWithPermissions(ctx, r.DB, nodeID)
+}
+
+// SetNodeOwnership sets the owner (user or group) for a node
+func (r *mutationResolver) SetNodeOwnership(ctx context.Context, nodeID string, ownerUserID *string, ownerGroupID *string) (*model.Node, error) {
+	logAction(fmt.Sprintf("Setting ownership for node %s", nodeID))
+
+	// Check if user has permission to change permissions
+	hasPermission, err := checkPermission(ctx, r.DB, nodeID, PERM_VIEW_PERMISSIONS)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: cannot view or modify ownership for this node")
+	}
+
+	// Validate ownerUserID if provided
+	if ownerUserID != nil && *ownerUserID != "" {
+		var userExists bool
+		err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", *ownerUserID).Scan(&userExists)
+		if err != nil {
+			log.Printf("Error checking if user exists: %v", err)
+			return nil, fmt.Errorf("failed to check if user exists: %v", err)
+		}
+
+		if !userExists {
+			return nil, fmt.Errorf("user not found")
+		}
+	}
+
+	// Validate ownerGroupID if provided
+	if ownerGroupID != nil && *ownerGroupID != "" {
+		var groupExists bool
+		err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?)", *ownerGroupID).Scan(&groupExists)
+		if err != nil {
+			log.Printf("Error checking if group exists: %v", err)
+			return nil, fmt.Errorf("failed to check if group exists: %v", err)
+		}
+
+		if !groupExists {
+			return nil, fmt.Errorf("group not found")
+		}
+	}
+
+	// Update the ownership
+	query := "UPDATE nodes SET"
+	args := []interface{}{}
+
+	if ownerUserID != nil {
+		if *ownerUserID == "" {
+			query += " owner_user_id = NULL"
+		} else {
+			query += " owner_user_id = ?"
+			args = append(args, *ownerUserID)
+		}
+	}
+
+	if ownerGroupID != nil {
+		if len(args) > 0 {
+			query += ","
+		}
+
+		if *ownerGroupID == "" {
+			query += " owner_group_id = NULL"
+		} else {
+			query += " owner_group_id = ?"
+			args = append(args, *ownerGroupID)
+		}
+	}
+
+	query += " WHERE id = ?"
+	args = append(args, nodeID)
+
+	_, err = r.DB.Exec(query, args...)
+	if err != nil {
+		log.Printf("Error updating node ownership: %v", err)
+		return nil, fmt.Errorf("failed to update node ownership: %v", err)
+	}
+
+	// Get the updated node
+	return getNodeWithPermissions(ctx, r.DB, nodeID)
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -1058,7 +1636,14 @@ func (r *queryResolver) GetRootNodes(ctx context.Context) ([]*model.Node, error)
 
 // GetNodeByID is the resolver for the getNodeById field.
 func (r *queryResolver) GetNodeByID(ctx context.Context, id string) (*model.Node, error) {
-	panic(fmt.Errorf("not implemented: GetNodeByID - getNodeById"))
+	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
+
+	if r.DB == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	// Use the helper function that also checks permissions
+	return getNodeWithPermissions(ctx, r.DB, id)
 }
 
 // GetChildNodes hämtar alla noder som har ett specifikt förälder-ID
@@ -1216,6 +1801,222 @@ func (r *queryResolver) GetUserSetting(ctx context.Context, key string) (*model.
 	setting.UpdatedAt = updatedAt
 
 	return &setting, nil
+}
+
+// GetGroups returns all groups in the system
+func (r *queryResolver) GetGroups(ctx context.Context) ([]*model.Group, error) {
+	logAction("Fetching all groups")
+
+	// Only users with permission to view permissions should see all groups
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, userID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return nil, fmt.Errorf("permission denied: must be an administrator to view all groups")
+	}
+
+	// Query all groups
+	rows, err := r.DB.Query(`
+		SELECT id, name
+		FROM groups
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		log.Printf("Error fetching groups: %v", err)
+		return nil, fmt.Errorf("failed to fetch groups: %v", err)
+	}
+	defer rows.Close()
+
+	var groups []*model.Group
+	for rows.Next() {
+		var group model.Group
+		if err := rows.Scan(&group.ID, &group.Name); err != nil {
+			log.Printf("Error scanning group row: %v", err)
+			return nil, fmt.Errorf("failed to scan group row: %v", err)
+		}
+		groups = append(groups, &group)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over group rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over group rows: %v", err)
+	}
+
+	return groups, nil
+}
+
+// GetGroup returns a single group by ID
+func (r *queryResolver) GetGroup(ctx context.Context, id string) (*model.Group, error) {
+	logAction(fmt.Sprintf("Fetching group with ID: %s", id))
+
+	// Only users with permission to view permissions should see group details
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the user is an administrator or is in the requested group
+	var hasPermission bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND (g.name = 'Administrators' OR gm.group_id = ?)
+		)
+	`, userID, id).Scan(&hasPermission)
+
+	if err != nil {
+		log.Printf("Error checking group permission: %v", err)
+		return nil, fmt.Errorf("failed to check group permission: %v", err)
+	}
+
+	if !hasPermission {
+		return nil, fmt.Errorf("permission denied: can only view groups you are a member of")
+	}
+
+	// Query the group
+	var group model.Group
+	err = r.DB.QueryRow(`
+		SELECT id, name
+		FROM groups
+		WHERE id = ?
+	`, id).Scan(&group.ID, &group.Name)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("group not found")
+	} else if err != nil {
+		log.Printf("Error fetching group: %v", err)
+		return nil, fmt.Errorf("failed to fetch group: %v", err)
+	}
+
+	// Get members of the group
+	memberRows, err := r.DB.Query(`
+		SELECT u.id, u.username
+		FROM users u
+		JOIN group_members gm ON u.id = gm.user_id
+		WHERE gm.group_id = ?
+		ORDER BY u.username ASC
+	`, id)
+	if err != nil {
+		log.Printf("Error fetching group members: %v", err)
+		return nil, fmt.Errorf("failed to fetch group members: %v", err)
+	}
+	defer memberRows.Close()
+
+	var members []*model.User
+	for memberRows.Next() {
+		var user model.User
+		if err := memberRows.Scan(&user.ID, &user.Username); err != nil {
+			log.Printf("Error scanning user row: %v", err)
+			return nil, fmt.Errorf("failed to scan user row: %v", err)
+		}
+		user.Name = user.Username // Using username as name for simplicity
+		members = append(members, &user)
+	}
+
+	if err := memberRows.Err(); err != nil {
+		log.Printf("Error iterating over member rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over member rows: %v", err)
+	}
+
+	group.Members = members
+	return &group, nil
+}
+
+// GetUserGroups returns groups that the current user is a member of
+func (r *queryResolver) GetUserGroups(ctx context.Context) ([]*model.Group, error) {
+	logAction("Fetching groups for current user")
+
+	// Get user ID from context
+	userID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return getUserGroups(ctx, r.DB, userID)
+}
+
+// GetUserByID returns a user by ID
+func (r *queryResolver) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+	logAction(fmt.Sprintf("Fetching user with ID: %s", id))
+
+	// Only users with permission to view user information should be able to do this
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// If user is requesting their own info, allow it
+	if currentUserID == id {
+		// Self-lookup is always allowed
+	} else {
+		// Otherwise, check if user has admin privileges
+		var isAdmin bool
+		err = r.DB.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1 
+				FROM group_members gm
+				JOIN groups g ON gm.group_id = g.id
+				WHERE gm.user_id = ? AND g.name = 'Administrators'
+			)
+		`, currentUserID).Scan(&isAdmin)
+
+		if err != nil {
+			log.Printf("Error checking admin status: %v", err)
+			return nil, fmt.Errorf("failed to check administrator status: %v", err)
+		}
+
+		if !isAdmin {
+			return nil, fmt.Errorf("permission denied: must be an administrator to view other users")
+		}
+	}
+
+	// Query the user
+	var user model.User
+	err = r.DB.QueryRow(`
+		SELECT id, username
+		FROM users
+		WHERE id = ?
+	`, id).Scan(&user.ID, &user.Username)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	} else if err != nil {
+		log.Printf("Error fetching user: %v", err)
+		return nil, fmt.Errorf("failed to fetch user: %v", err)
+	}
+
+	user.Name = user.Username // Using username as name for simplicity
+
+	// Get groups for the user
+	groups, err := getUserGroups(ctx, r.DB, id)
+	if err != nil {
+		log.Printf("Error fetching user groups: %v", err)
+		// Continue without groups - not a critical error
+	} else {
+		user.Groups = groups
+	}
+
+	return &user, nil
 }
 
 // User implementerar Todo.user

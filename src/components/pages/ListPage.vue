@@ -77,7 +77,7 @@
   </MainLayout>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import MainLayout from '../templates/MainLayout.vue';
 import Button from '../atoms/Button.vue';
@@ -86,6 +86,8 @@ import FileDetailSidepanel from '../organisms/FileDetailSidepanel.vue';
 import FolderPanel from '../organisms/FolderPanel.vue';
 import { useGraphQL } from '../../composables/useGraphQL';
 import { useNodeHandling } from '../../composables/useNodeHandling';
+import { File, Metadata, MetadataInput } from '../../types/schema';
+import { ViewMode, ViewModeOption, StatusType } from '../../types/ui';
 
 // Set up GraphQL client
 const { loading, error, getFiles, getFileById, updateFileMetadata, deleteFile, deleteFileMetadata } = useGraphQL();
@@ -103,6 +105,7 @@ const {
   fetchRootNodes,
   fetchNodeFiles,
   fetchNodeChildren,
+  fetchNodeById,
   toggleNodeExpand,
   selectNode,
   addNewNode,
@@ -111,7 +114,7 @@ const {
   initialize
 } = useNodeHandling();
 
-const viewModes = [
+const viewModes: ViewModeOption[] = [
   { id: 'table', label: 'Tabellvy', icon: 'table_rows' },
   { id: 'grid', label: 'Rutnätsvy', icon: 'grid_view' },
   { id: 'card', label: 'Kortvy', icon: 'view_agenda' },
@@ -119,17 +122,17 @@ const viewModes = [
 ];
 
 // UI state
-const viewMode = ref(localStorage.getItem('preferredViewMode') || 'table');
-const files = ref([]);
-const selectedFileId = ref(null);
-const expandedFileId = ref(null);
-const selectedFile = ref(null);
-const isEditingMetadata = ref(false);
-const editingMetadata = ref([]);
-const activeMetadataTab = ref('list');
-const metadataSearch = ref('');
-const statusMessage = ref('');
-const statusType = ref(''); // 'success', 'error', 'info'
+const viewMode = ref<ViewMode>(localStorage.getItem('preferredViewMode') as ViewMode || 'table');
+const files = ref<File[]>([]);
+const selectedFileId = ref<string | null>(null);
+const expandedFileId = ref<string | null>(null);
+const selectedFile = ref<File | null>(null);
+const isEditingMetadata = ref<boolean>(false);
+const editingMetadata = ref<MetadataInput[]>([]);
+const activeMetadataTab = ref<string>('list');
+const metadataSearch = ref<string>('');
+const statusMessage = ref<string>('');
+const statusType = ref<StatusType | ''>(''); // 'success', 'error', 'info'
 
 // Computed property for the current node name
 const currentNodeName = computed(() => {
@@ -145,13 +148,13 @@ const showSidepanel = computed(() => {
 });
 
 // Update view mode and save preference
-const updateViewMode = (mode) => {
+const updateViewMode = (mode: ViewMode): void => {
   viewMode.value = mode;
   localStorage.setItem('preferredViewMode', mode);
 };
 
 // Handle file selection
-const handleFileSelect = async (fileId) => {
+const handleFileSelect = async (fileId: string): Promise<void> => {
   if (selectedFileId.value === fileId && viewMode.value !== 'split') {
     // Toggle off if already selected, except in split view
     selectedFileId.value = null;
@@ -171,7 +174,7 @@ const handleFileSelect = async (fileId) => {
 };
 
 // Handle file expand toggle
-const handleFileExpand = (fileId) => {
+const handleFileExpand = (fileId: string): void => {
   if (expandedFileId.value === fileId) {
     expandedFileId.value = null;
   } else {
@@ -180,7 +183,7 @@ const handleFileExpand = (fileId) => {
 };
 
 // Handle closing the sidepanel
-const handleCloseSidepanel = () => {
+const handleCloseSidepanel = (): void => {
   if (viewMode.value !== 'split') {
     selectedFileId.value = null;
     selectedFile.value = null;
@@ -189,7 +192,7 @@ const handleCloseSidepanel = () => {
 };
 
 // Handle node selection
-const handleNodeSelect = async (nodeId) => {
+const handleNodeSelect = async (nodeId: string): Promise<void> => {
   try {
     // Use the selectNode function that will fetch files and expand the node
     await selectNode(nodeId);
@@ -207,7 +210,7 @@ const handleNodeSelect = async (nodeId) => {
 };
 
 // Handle node expansion toggle
-const handleNodeExpand = async (nodeId) => {
+const handleNodeExpand = async (nodeId: string): Promise<void> => {
   try {
     await toggleNodeExpand(nodeId);
   } catch (error) {
@@ -216,40 +219,40 @@ const handleNodeExpand = async (nodeId) => {
 };
 
 // Handle node addition
-const handleAddNode = async (nodeName, parentId) => {
+const handleAddNode = async (nodeName: string, parentId?: string): Promise<void> => {
   try {
     await addNewNode(nodeName, parentId);
     showStatus('Mapp skapad', 'success');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating folder:', error);
     showStatus('Kunde inte skapa mapp: ' + error.message, 'error');
   }
 };
 
 // Handle node rename
-const handleRenameNode = async (nodeId, newName) => {
+const handleRenameNode = async (nodeId: string, newName: string): Promise<void> => {
   try {
     await updateNodeName(nodeId, newName);
     showStatus('Mappnamn uppdaterat', 'success');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error renaming folder:', error);
     showStatus('Kunde inte byta namn på mapp: ' + error.message, 'error');
   }
 };
 
 // Handle node deletion
-const handleDeleteNode = async (nodeId) => {
+const handleDeleteNode = async (nodeId: string): Promise<void> => {
   try {
     await removeNode(nodeId);
     showStatus('Mapp borttagen', 'success');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error deleting folder:', error);
     showStatus('Kunde inte ta bort mapp: ' + error.message, 'error');
   }
 };
 
 // Show status message
-const showStatus = (message, type = 'info') => {
+const showStatus = (message: string, type: StatusType = 'info') => {
   statusMessage.value = message;
   statusType.value = type;
   
@@ -260,14 +263,14 @@ const showStatus = (message, type = 'info') => {
 };
 
 // Handle download file
-const handleDownloadFile = (file) => {
+const handleDownloadFile = (file: File): void => {
   // Implement download logic
   console.log('Downloading file:', file);
 };
 
 // Handle edit metadata
-const handleEditMetadata = (file) => {
-  editingMetadata.value = [...(file.metadata || [])];
+const handleEditMetadata = (file: File): void => {
+  editingMetadata.value = [...(file.metadata || []).map(m => ({key: m.key, value: m.value}))];
   if (editingMetadata.value.length === 0) {
     editingMetadata.value.push({ key: '', value: '' });
   }
@@ -275,7 +278,7 @@ const handleEditMetadata = (file) => {
 };
 
 // Handle save metadata
-const handleSaveMetadata = async () => {
+const handleSaveMetadata = async (): Promise<void> => {
   if (!selectedFile.value) return;
   
   try {
@@ -297,12 +300,12 @@ const handleSaveMetadata = async () => {
 };
 
 // Handle cancel edit
-const handleCancelEdit = () => {
+const handleCancelEdit = (): void => {
   isEditingMetadata.value = false;
 };
 
 // Handle delete file
-const handleDeleteFile = async (fileId) => {
+const handleDeleteFile = async (fileId: string): Promise<void> => {
   if (confirm('Är du säker på att du vill ta bort denna fil? Denna åtgärd kan inte ångras.')) {
     try {
       await deleteFile(fileId);
@@ -317,9 +320,10 @@ const handleDeleteFile = async (fileId) => {
 };
 
 // Handle delete metadata
-const handleDeleteMetadata = async (fileId, metadataKey) => {
+const handleDeleteMetadata = async (fileId: string, metadataKey: string | string[]): Promise<void> => {
   try {
-    await deleteFileMetadata(fileId, metadataKey);
+    const keysToDelete = Array.isArray(metadataKey) ? metadataKey : [metadataKey];
+    await deleteFileMetadata(fileId, keysToDelete);
     
     // Refresh file data
     const updatedFile = await getFileById(fileId);
@@ -332,7 +336,7 @@ const handleDeleteMetadata = async (fileId, metadataKey) => {
 };
 
 // Handle refresh
-const handleRefresh = async () => {
+const handleRefresh = async (): Promise<void> => {
   try {
     await fetchNodeFiles(selectedNodeId.value);
     showStatus('Innehåll uppdaterat', 'info');
@@ -343,7 +347,7 @@ const handleRefresh = async () => {
 };
 
 // Initialize the page
-onMounted(async () => {
+onMounted(async (): Promise<void> => {
   await initialize();
 });
 </script>

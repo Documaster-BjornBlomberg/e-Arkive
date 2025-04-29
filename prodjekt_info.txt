@@ -1,67 +1,20 @@
 frontend:
 detta prodjekt ska anvenda sig av Atomic design och när nya frontend element ska implementeras ska man anvenda redan implementerade delar först och endast vid behov så skapar man nya dellar.
 
-backend:
-implementera nya API frågor
-Här är en kort guide för hur du implementerar en delad hjälpfunktion mellan resolvers i en GraphQL-backend med gqlgen:
-## Hur man delar funktioner mellan resolvers i GraphQL
-När du behöver använda samma funktionalitet i flera resolvers (t.ex. både i Query och Mutation):
-1. **Skapa en fristående hjälpfunktion** i schema.resolvers.go:
-   ```go
-   func helperFunction(ctx context.Context, db *sql.DB, id string) (*model.Result, error) {
-       // Implementera delad logik här
-       return result, nil
-   }
-   ```
-2. **Använd explicit databasanslutning** istället för resolver-instans i hjälpfunktionen.
-3. **Anropa hjälpfunktionen** från resolvers:
-   ```go
-   func (r *queryResolver) GetSomething(ctx context.Context, id string) (*model.Result, error) {
-       return helperFunction(ctx, r.DB, id)
-   }
-   
-   func (r *mutationResolver) UpdateSomething(ctx context.Context, id string) (*model.Result, error) {
-       // Kod för uppdatering
-       return helperFunction(ctx, r.DB, id)
-   }
-   ```
-4. **Undvik duplicerade metoder** - kontrollera att du inte definierar samma metoder som redan finns i resolver.go.
-Detta mönster löser typiska fel som "type x has no field or method y" och "method already declared" i GraphQL-resolvers.
+
 
 Envierment:
 operativ systemet jag utveklar och testar på är windows 11 och den kör powershell i teminalen.
 
-Backend Arkitektur (Hybrid Modell):
-Backend är nu strukturerad enligt en hybrid modell som separerar olika ansvarsområden:
-
-1. **auth/ paketet** - Hanterar all autentisering och behörigheter
-   - auth.go: JWT-generering, validering, token-blacklisting och auth-hjälpfunktioner
-   - permissions.go: Beräkning och kontroll av användarbehörigheter för olika noder
-
-2. **datastore/ paketet** - Hanterar databasoperationer och dataåtkomst
-   - db.go: Databasanslutning och grundläggande konfiguration
-   - node_store.go: Funktioner för att hämta, skapa, uppdatera och ta bort noder
-   - file_store.go: Funktioner för att hantera filer (hämta, spara, ta bort)
-   - user_store.go: Funktioner för att hantera användare och deras inställningar
-
-3. **graph/ paketet** - GraphQL-schema och resolver-implementationer
-   - resolver.go: Huvudresolver med databasberoende
-   - schema.resolvers.go: Mutationer och queries som anropar datastore-funktioner
-   - node_resolver.go: Typspecifika resolver-funktioner för Node-typen
-   - file_resolver.go: Typspecifika resolver-funktioner för File-typen
-   - user_resolver.go: Typspecifika resolver-funktioner för User-typen
-
-4. **util/ paketet** - Allmänna hjälpfunktioner
-   - log.go: Loggningsfunktionalitet
-   - cycle_detection.go: Upptäcker cykler i nodhierarkin
+backend:
 
 När man implementerar nya funktioner:
-1. Lägg till databasoperationer i uppdate_databas.sql
-2. Om det behövs, lägg till hjälpfunktioner i util-paketet
-3. Om det påverkar autentisering, uppdatera auth-paketet
-4. Implementera resolver-funktioner i schema.resolvers.go som anropar datastore-funktioner
-5. För typspecifika resolvers, använd eller uppdatera motsvarande resolver-fil
-
-Denna struktur ger bättre separation av ansvarsområden, ökad testbarhet och enklare underhåll.
-
-
+1. Lägg till alla databas endringar i uppdate_databas.sql
+2. i filen resolvers.go ska man lägga alla hjälp funktioner.
+3. om man måste endra schema.GraphQL så måste man generera nya resolvers.
+     det gör man genom att köra
+         go get github.com/99designs/gqlgen@v0.17.69
+         go run github.com/99designs/gqlgen
+      i mappen graphql-backend
+   efter det kan man implementera eventuela hjälp funktioner.
+4. undvik att editera filer som autogenereras
