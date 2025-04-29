@@ -22,11 +22,34 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 )
 
+// =============================================
+// ========== GLOBALA VARIABLER ===============
+// =============================================
+
 // Globala variabler
-var db *sql.DB // Delar databasanslutningen genom hela applikationen
+var db *sql.DB // Databasanslutningen som delas genom hela applikationen
 
 // Standardport för servern om ingen annan specificerats
 const defaultPort = "8080"
+
+// =============================================
+// ========== HJÄLPSTRUKTURER ================
+// =============================================
+
+// responseLogger används för att fånga upp och logga svaren från GraphQL-servern
+type responseLogger struct {
+	http.ResponseWriter
+	body bytes.Buffer
+}
+
+func (rl *responseLogger) Write(b []byte) (int, error) {
+	rl.body.Write(b)
+	return rl.ResponseWriter.Write(b)
+}
+
+// =============================================
+// ========== DATABAS-FUNKTIONER =============
+// =============================================
 
 // initDB initierar anslutningen till SQLite-databasen
 // Skapar en ny databasfil om den inte redan finns
@@ -66,6 +89,10 @@ func createTables() {
 	log.Println("Database tables created or updated successfully")
 }
 
+// =============================================
+// ========== LOGGNING OCH VERKTYG ===========
+// =============================================
+
 // logRequest loggar alla inkommande HTTP-förfrågningar
 // Innehåller metod, sökväg och klientens IP-adress
 func logRequest(r *http.Request) {
@@ -95,17 +122,12 @@ func getLocalIP() string {
 	return "localhost"
 }
 
-// main är huvudfunktionen som startar servern
-func main() {
-	// Initierar databasen
-	initDB()
+// =============================================
+// ========== ENDPOINT-HANTERARE =============
+// =============================================
 
-	// Konfigurerar serverporten
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = defaultPort
-	}
-
+// setupGraphQLHandler konfigurerar och returnerar GraphQL-servern
+func setupGraphQLHandler() *handler.Server {
 	// Skapar en ny GraphQL-server med vår schema och resolver
 	srv := handler.New(graph.NewExecutableSchema(graph.Config{Resolvers: graph.NewResolver(db)}))
 
@@ -123,7 +145,11 @@ func main() {
 		Cache: lru.New[string](100),
 	})
 
-	// Konfigurerar endpoints
+	return srv
+}
+
+// setupQueryEndpoint konfigurerar /query-endpointen som hanterar GraphQL-förfrågningar
+func setupQueryEndpoint(srv *handler.Server) {
 	http.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
 		logAction("GraphQL query received")
@@ -152,7 +178,10 @@ func main() {
 		srv.ServeHTTP(responseRecorder, r)
 		log.Printf("Response sent: %s", responseRecorder.body.String())
 	})
+}
 
+// setupStaticEndpoints konfigurerar ändpunkter för statiska resurser (GraphiQL, sandbox etc.)
+func setupStaticEndpoints() {
 	http.HandleFunc("/graphiql", func(w http.ResponseWriter, r *http.Request) {
 		logRequest(r)
 		http.ServeFile(w, r, "graphiql.html")
@@ -161,6 +190,29 @@ func main() {
 	http.Handle("/sandbox", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(sandboxHTML)
 	}))
+}
+
+// =============================================
+// ========== HUVUDFUNKTION ==================
+// =============================================
+
+// main är huvudfunktionen som startar servern
+func main() {
+	// Initierar databasen
+	initDB()
+
+	// Konfigurerar serverporten
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = defaultPort
+	}
+
+	// Konfigurerar GraphQL-servern
+	srv := setupGraphQLHandler()
+
+	// Konfigurerar endpoints
+	setupQueryEndpoint(srv)
+	setupStaticEndpoints()
 
 	localIP := getLocalIP()
 
@@ -180,6 +232,10 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, handlerWithCORS))
 }
 
+// =============================================
+// ========== STATISKA RESURSER ==============
+// =============================================
+
 // sandboxHTML innehåller HTML för GraphQL Playground
 var sandboxHTML = []byte(`
 <!DOCTYPE html>
@@ -197,16 +253,4 @@ var sandboxHTML = []byte(`
  // advanced options: https://www.apollographql.com/docs/studio/explorer/sandbox#embedding-sandbox
 </script>
 </body>
-
 </html>`)
-
-// Define a responseLogger to capture the response body
-type responseLogger struct {
-	http.ResponseWriter
-	body bytes.Buffer
-}
-
-func (rl *responseLogger) Write(b []byte) (int, error) {
-	rl.body.Write(b)
-	return rl.ResponseWriter.Write(b)
-}

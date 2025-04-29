@@ -17,24 +17,18 @@ import (
 // This file will not be regenerated automatically.
 // It serves as dependency injection for your app, add any dependencies you require here.
 
+// =============================================
+// ========== TYPES OCH STRUKTURER ===========
+// =============================================
+
 // Resolver är den huvudsakliga resolver-typen för GraphQL
 // Hantera alla grafrelaterade funktioner och databasanslutning
 type Resolver struct {
 	DB *sql.DB
 }
 
-// NewResolver skapar en ny resolver med en databasanslutning
-func NewResolver(db *sql.DB) *Resolver {
-	return &Resolver{DB: db}
-}
-
-// AuthTokenKey används för att lagra JWT token i context
+// authTokenKey används för att lagra JWT token i context
 type authTokenKey struct{}
-
-// WithAuthToken lägger till JWT token i context
-func WithAuthToken(ctx context.Context, token string) context.Context {
-	return context.WithValue(ctx, authTokenKey{}, token)
-}
 
 // NodeResolver interface definition
 type NodeResolver interface {
@@ -48,10 +42,166 @@ type FileResolver interface {
 	Node(ctx context.Context, obj *model.File) (*model.Node, error)
 }
 
+// Resolver implementations
+type nodeResolver struct{ *Resolver }
+type fileResolver struct{ *Resolver }
+type userResolver struct{ *Resolver }
+
+// =============================================
+// ========== GLOBALA VARIABLER ==============
+// =============================================
+
+// TokenBlacklist is a map to store invalidated tokens
+var TokenBlacklist = make(map[string]bool)
+var tokenBlacklistMutex sync.Mutex
+
+// =============================================
+// ========== RESOLVER CREATION ==============
+// =============================================
+
+// NewResolver skapar en ny resolver med en databasanslutning
+func NewResolver(db *sql.DB) *Resolver {
+	return &Resolver{DB: db}
+}
+
+// =============================================
+// ========== LOGGNING =======================
+// =============================================
+
+// logAction loggar viktiga händelser i systemet
 func logAction(action string) {
 	log.Printf("[ACTION] %s", action)
 }
 
+// =============================================
+// ========== NODE FUNKTIONER ===============
+// =============================================
+
+// getNodeById hämtar en nod från databasen baserat på ID
+func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
+	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
+
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	row := db.QueryRow(`
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
+		WHERE id = ?
+	`, id)
+
+	var node model.Node
+	var parentID sql.NullString
+	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		log.Printf("Node with ID %s not found", id)
+		return nil, fmt.Errorf("node not found")
+	} else if err != nil {
+		log.Printf("Error fetching node with ID %s: %v", id, err)
+		return nil, fmt.Errorf("failed to fetch node: %v", err)
+	}
+
+	if parentID.Valid {
+		parentIDStr := parentID.String
+		node.ParentID = &parentIDStr
+	}
+
+	// Hämta alla barn till denna nod
+	rows, err := db.Query(`
+		SELECT id, name, parent_id, created_at, updated_at
+		FROM nodes
+		WHERE parent_id = ?
+		ORDER BY name ASC
+	`, node.ID)
+	if err != nil {
+		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
+		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
+	}
+	defer rows.Close()
+
+	children, err := scanNodeRows(rows)
+	if err != nil {
+		log.Printf("Error scanning child rows: %v", err)
+		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
+	}
+
+	node.Children = children
+	return &node, nil
+}
+
+// scanNodeRows läser noddata från SQL-rader och konverterar till Node-objekt
+func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
+	var nodes []*model.Node
+	for rows.Next() {
+		var node model.Node
+		var parentID sql.NullString
+		var createdAt, updatedAt string
+
+		if err := rows.Scan(&node.ID, &node.Name, &parentID, &createdAt, &updatedAt); err != nil {
+			log.Printf("Error scanning node row: %v", err)
+			return nil, fmt.Errorf("failed to scan node row: %v", err)
+		}
+
+		node.CreatedAt = createdAt
+		node.UpdatedAt = updatedAt
+		if parentID.Valid {
+			parentIDStr := parentID.String
+			node.ParentID = &parentIDStr
+		}
+
+		nodes = append(nodes, &node)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over node rows: %v", err)
+		return nil, fmt.Errorf("failed to iterate over node rows: %v", err)
+	}
+
+	return nodes, nil
+}
+
+// detectCycle kontrollerar om en förälder-barn relation skulle skapa en cykel i hierarkin
+func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
+	// Om den nya föräldern är samma som noden själv, är det en cykel
+	if nodeID == newParentID {
+		*isCycle = true
+		return nil
+	}
+
+	// Kontrollera om den nya föräldern har den aktuella noden som förfader
+	var currentParentID sql.NullString
+	err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", newParentID).Scan(&currentParentID)
+	if err == sql.ErrNoRows {
+		// Om föräldern inte finns, är det inget problem
+		*isCycle = false
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	// Om förälderns förälder är NULL, är det slutet på kedjan - ingen cykel
+	if !currentParentID.Valid {
+		*isCycle = false
+		return nil
+	}
+
+	// Om förälderns förälder är den aktuella noden, är det en cykel
+	if currentParentID.String == nodeID {
+		*isCycle = true
+		return nil
+	}
+
+	// Fortsätt rekursivt upp i hierarkin
+	return r.detectCycle(nodeID, currentParentID.String, isCycle)
+}
+
+// =============================================
+// ========== FILE FUNKTIONER ===============
+// =============================================
+
+// Implementering av GetFilesByNodeId för queryResolver
 func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]*model.File, error) {
 	logAction(fmt.Sprintf("Fetching files for node ID: %s", nodeID))
 
@@ -134,85 +284,30 @@ func (r *queryResolver) GetFilesByNodeId(ctx context.Context, nodeID string) ([]
 	return files, nil
 }
 
-func (r *queryResolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
-	return getNodeById(ctx, r.DB, id)
+// =============================================
+// ========== AUTENTISERING ==================
+// =============================================
+
+// WithAuthToken lägger till JWT token i context
+func WithAuthToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, authTokenKey{}, token)
 }
 
-func getNodeById(ctx context.Context, db *sql.DB, id string) (*model.Node, error) {
-	logAction(fmt.Sprintf("Fetching node with ID: %s", id))
-
-	if db == nil {
-		return nil, fmt.Errorf("database connection is not initialized")
-	}
-
-	row := db.QueryRow(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE id = ?
-	`, id)
-
-	var node model.Node
-	var parentID sql.NullString
-	err := row.Scan(&node.ID, &node.Name, &parentID, &node.CreatedAt, &node.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		log.Printf("Node with ID %s not found", id)
-		return nil, fmt.Errorf("node not found")
-	} else if err != nil {
-		log.Printf("Error fetching node with ID %s: %v", id, err)
-		return nil, fmt.Errorf("failed to fetch node: %v", err)
-	}
-
-	if parentID.Valid {
-		parentIDStr := parentID.String
-		node.ParentID = &parentIDStr
-	}
-
-	// Hämta alla barn till denna nod
-	rows, err := db.Query(`
-		SELECT id, name, parent_id, created_at, updated_at
-		FROM nodes
-		WHERE parent_id = ?
-		ORDER BY name ASC
-	`, node.ID)
-	if err != nil {
-		log.Printf("Error fetching children for node ID %s: %v", node.ID, err)
-		return &node, nil // Returnera noden även om vi inte kunde hämta barnen
-	}
-	defer rows.Close()
-
-	children, err := scanNodeRows(rows)
-	if err != nil {
-		log.Printf("Error scanning child rows: %v", err)
-		return &node, nil // Returnera noden även om vi inte kunde läsa barnen
-	}
-
-	node.Children = children
-	return &node, nil
-}
-
-type nodeResolver struct{ *Resolver }
-type fileResolver struct{ *Resolver }
-type userResolver struct{ *Resolver }
-
-// TokenBlacklist is a map to store invalidated tokens
-var TokenBlacklist = make(map[string]bool)
-var tokenBlacklistMutex sync.Mutex
-
-// IsTokenBlacklisted checks if a token is in the blacklist
+// IsTokenBlacklisted kontrollerar om en token är i blacklist
 func IsTokenBlacklisted(token string) bool {
 	tokenBlacklistMutex.Lock()
 	defer tokenBlacklistMutex.Unlock()
 	return TokenBlacklist[token]
 }
 
-// BlacklistToken adds a token to the blacklist
+// BlacklistToken lägger till en token i blacklist
 func BlacklistToken(token string) {
 	tokenBlacklistMutex.Lock()
 	defer tokenBlacklistMutex.Unlock()
 	TokenBlacklist[token] = true
 }
 
+// generateJWT genererar en JWT-token för en användare
 func generateJWT(userID, username string) (string, error) {
 	// Create a new JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -232,7 +327,7 @@ func generateJWT(userID, username string) (string, error) {
 	return tokenString, nil
 }
 
-// validateJWT validates the JWT token and checks if it's blacklisted
+// validateJWT validerar en JWT-token och kontrollerar om den är blacklistad
 func validateJWT(tokenString string) (jwt.MapClaims, error) {
 	// Check if token is blacklisted
 	if IsTokenBlacklisted(tokenString) {
@@ -263,70 +358,6 @@ func validateJWT(tokenString string) (jwt.MapClaims, error) {
 	return nil, fmt.Errorf("invalid token")
 }
 
-func scanNodeRows(rows *sql.Rows) ([]*model.Node, error) {
-	var nodes []*model.Node
-	for rows.Next() {
-		var node model.Node
-		var parentID sql.NullString
-		var createdAt, updatedAt string
-
-		if err := rows.Scan(&node.ID, &node.Name, &parentID, &createdAt, &updatedAt); err != nil {
-			log.Printf("Error scanning node row: %v", err)
-			return nil, fmt.Errorf("failed to scan node row: %v", err)
-		}
-
-		node.CreatedAt = createdAt
-		node.UpdatedAt = updatedAt
-		if parentID.Valid {
-			parentIDStr := parentID.String
-			node.ParentID = &parentIDStr
-		}
-
-		nodes = append(nodes, &node)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over node rows: %v", err)
-		return nil, fmt.Errorf("failed to iterate over node rows: %v", err)
-	}
-
-	return nodes, nil
-}
-
-func (r *Resolver) detectCycle(nodeID string, newParentID string, isCycle *bool) error {
-	// Om den nya föräldern är samma som noden själv, är det en cykel
-	if nodeID == newParentID {
-		*isCycle = true
-		return nil
-	}
-
-	// Kontrollera om den nya föräldern har den aktuella noden som förfader
-	var currentParentID sql.NullString
-	err := r.DB.QueryRow("SELECT parent_id FROM nodes WHERE id = ?", newParentID).Scan(&currentParentID)
-	if err == sql.ErrNoRows {
-		// Om föräldern inte finns, är det inget problem
-		*isCycle = false
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	// Om förälderns förälder är NULL, är det slutet på kedjan - ingen cykel
-	if !currentParentID.Valid {
-		*isCycle = false
-		return nil
-	}
-
-	// Om förälderns förälder är den aktuella noden, är det en cykel
-	if currentParentID.String == nodeID {
-		*isCycle = true
-		return nil
-	}
-
-	// Fortsätt rekursivt upp i hierarkin
-	return r.detectCycle(nodeID, currentParentID.String, isCycle)
-}
-
 // GetAuthToken hämtar JWT-token från context och validerar den
 func GetAuthToken(ctx context.Context) (string, bool) {
 	// Try both Authorization and Authenticate headers
@@ -348,6 +379,36 @@ func GetAuthToken(ctx context.Context) (string, bool) {
 	return token, true
 }
 
+// getUserIDFromContext hämtar användar-ID från JWT-token i context
+func getUserIDFromContext(ctx context.Context) (string, error) {
+	// Get the token from the context
+	token, ok := GetAuthToken(ctx)
+	if !ok {
+		return "", fmt.Errorf("not authenticated")
+	}
+
+	// Parse and validate the token
+	claims, err := validateJWT(token)
+	if err != nil {
+		log.Printf("Error validating JWT token: %v", err)
+		return "", fmt.Errorf("not authenticated")
+	}
+
+	// Get user ID from claims
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		log.Printf("Invalid token claims: user_id not found")
+		return "", fmt.Errorf("invalid authentication token")
+	}
+
+	return userID, nil
+}
+
+// =============================================
+// ========== USER SETTINGS =================
+// =============================================
+
+// Settings hämtar användarinställningar för en användare
 func (r *userResolver) Settings(ctx context.Context, obj *model.User) ([]*model.UserSetting, error) {
 	logAction(fmt.Sprintf("Fetching settings for user: %s", obj.ID))
 
@@ -385,26 +446,11 @@ func (r *userResolver) Settings(ctx context.Context, obj *model.User) ([]*model.
 
 	return settings, nil
 }
-func getUserIDFromContext(ctx context.Context) (string, error) {
-	// Get the token from the context
-	token, ok := GetAuthToken(ctx)
-	if !ok {
-		return "", fmt.Errorf("not authenticated")
-	}
 
-	// Parse and validate the token
-	claims, err := validateJWT(token)
-	if err != nil {
-		log.Printf("Error validating JWT token: %v", err)
-		return "", fmt.Errorf("not authenticated")
-	}
+// =============================================
+// ========== CORE RESOLVER GETTERS ===========
+// =============================================
 
-	// Get user ID from claims
-	userID, ok := claims["user_id"].(string)
-	if !ok {
-		log.Printf("Invalid token claims: user_id not found")
-		return "", fmt.Errorf("invalid authentication token")
-	}
-
-	return userID, nil
+func (r *Resolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
+	return getNodeById(ctx, r.DB, id)
 }

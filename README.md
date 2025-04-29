@@ -228,9 +228,25 @@ Projektet är konfigurerat för utveckling på Windows 11 med PowerShell som sta
 
 ```plaintext
 ├── graphql-backend/        # Backend-kod
+│   ├── auth/              # Autentisering och behörigheter
+│   │   ├── auth.go       # JWT-hantering, token-validering
+│   │   └── permissions.go # Behörighetshantering och kontroller
+│   ├── datastore/        # Databasoperationer och dataåtkomst
+│   │   ├── db.go         # Databasanslutning
+│   │   ├── file_store.go # Filhanteringsoperationer
+│   │   ├── node_store.go # Nodhanteringsoperationer
+│   │   └── user_store.go # Användarhanteringsoperationer
 │   ├── graph/             # GraphQL-schema och resolvers
 │   │   ├── model/        # GraphQL-datamodeller
+│   │   ├── file_resolver.go # Filtypsresolver
+│   │   ├── node_resolver.go # Nodtypsresolver
+│   │   ├── user_resolver.go # Användartypsresolver
+│   │   ├── resolver.go   # Huvudresolver med beroendeinjektion
+│   │   ├── schema.resolvers.go # Implementationer av queries och mutations
 │   │   └── schema.graphqls # GraphQL-schema
+│   ├── util/              # Hjälpfunktioner
+│   │   ├── cycle_detection.go # Upptäcker cykler i nodhierarkier
+│   │   └── log.go        # Loggningsfunktioner
 │   ├── e-Arkive.db        # SQLite-databasfil
 │   └── server.go          # Huvudfil för backend
 ├── src/                   # Frontend-kod

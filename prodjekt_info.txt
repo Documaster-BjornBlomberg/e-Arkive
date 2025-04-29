@@ -31,4 +31,37 @@ Detta mönster löser typiska fel som "type x has no field or method y" och "met
 Envierment:
 operativ systemet jag utveklar och testar på är windows 11 och den kör powershell i teminalen.
 
+Backend Arkitektur (Hybrid Modell):
+Backend är nu strukturerad enligt en hybrid modell som separerar olika ansvarsområden:
+
+1. **auth/ paketet** - Hanterar all autentisering och behörigheter
+   - auth.go: JWT-generering, validering, token-blacklisting och auth-hjälpfunktioner
+   - permissions.go: Beräkning och kontroll av användarbehörigheter för olika noder
+
+2. **datastore/ paketet** - Hanterar databasoperationer och dataåtkomst
+   - db.go: Databasanslutning och grundläggande konfiguration
+   - node_store.go: Funktioner för att hämta, skapa, uppdatera och ta bort noder
+   - file_store.go: Funktioner för att hantera filer (hämta, spara, ta bort)
+   - user_store.go: Funktioner för att hantera användare och deras inställningar
+
+3. **graph/ paketet** - GraphQL-schema och resolver-implementationer
+   - resolver.go: Huvudresolver med databasberoende
+   - schema.resolvers.go: Mutationer och queries som anropar datastore-funktioner
+   - node_resolver.go: Typspecifika resolver-funktioner för Node-typen
+   - file_resolver.go: Typspecifika resolver-funktioner för File-typen
+   - user_resolver.go: Typspecifika resolver-funktioner för User-typen
+
+4. **util/ paketet** - Allmänna hjälpfunktioner
+   - log.go: Loggningsfunktionalitet
+   - cycle_detection.go: Upptäcker cykler i nodhierarkin
+
+När man implementerar nya funktioner:
+1. Lägg till databasoperationer i uppdate_databas.sql
+2. Om det behövs, lägg till hjälpfunktioner i util-paketet
+3. Om det påverkar autentisering, uppdatera auth-paketet
+4. Implementera resolver-funktioner i schema.resolvers.go som anropar datastore-funktioner
+5. För typspecifika resolvers, använd eller uppdatera motsvarande resolver-fil
+
+Denna struktur ger bättre separation av ansvarsområden, ökad testbarhet och enklare underhåll.
+
 
