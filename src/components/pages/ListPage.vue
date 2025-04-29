@@ -124,8 +124,8 @@ const viewModes: ViewModeOption[] = [
 // UI state
 const viewMode = ref<ViewMode>(localStorage.getItem('preferredViewMode') as ViewMode || 'table');
 const files = ref<File[]>([]);
-const selectedFileId = ref<string | null>(null);
-const expandedFileId = ref<string | null>(null);
+const selectedFileId = ref<string | undefined>(undefined);
+const expandedFileId = ref<string | undefined>(undefined);
 const selectedFile = ref<File | null>(null);
 const isEditingMetadata = ref<boolean>(false);
 const editingMetadata = ref<MetadataInput[]>([]);
@@ -136,8 +136,9 @@ const statusType = ref<StatusType | ''>(''); // 'success', 'error', 'info'
 
 // Computed property for the current node name
 const currentNodeName = computed(() => {
-  if (currentNode.value) {
-    return currentNode.value.name;
+  const currentNodeTyped = currentNode.value as { name?: string } | null;
+  if (currentNodeTyped && currentNodeTyped.name) {
+    return currentNodeTyped.name;
   }
   return 'Alla dokument';
 });
@@ -157,7 +158,7 @@ const updateViewMode = (mode: ViewMode): void => {
 const handleFileSelect = async (fileId: string): Promise<void> => {
   if (selectedFileId.value === fileId && viewMode.value !== 'split') {
     // Toggle off if already selected, except in split view
-    selectedFileId.value = null;
+    selectedFileId.value = undefined;
     selectedFile.value = null;
     return;
   }
@@ -176,7 +177,7 @@ const handleFileSelect = async (fileId: string): Promise<void> => {
 // Handle file expand toggle
 const handleFileExpand = (fileId: string): void => {
   if (expandedFileId.value === fileId) {
-    expandedFileId.value = null;
+    expandedFileId.value = undefined;
   } else {
     expandedFileId.value = fileId;
   }
@@ -185,7 +186,7 @@ const handleFileExpand = (fileId: string): void => {
 // Handle closing the sidepanel
 const handleCloseSidepanel = (): void => {
   if (viewMode.value !== 'split') {
-    selectedFileId.value = null;
+    selectedFileId.value = undefined;
     selectedFile.value = null;
   }
   isEditingMetadata.value = false;
@@ -198,11 +199,13 @@ const handleNodeSelect = async (nodeId: string): Promise<void> => {
     await selectNode(nodeId);
     
     // Clear any selected file when changing nodes
-    selectedFileId.value = null;
+    selectedFileId.value = undefined;
     selectedFile.value = null;
-
+    
     // Show status message for better user feedback
-    showStatus(`Visar innehåll från "${currentNode.value?.name || 'mapp'}"`, 'info');
+    const currentNodeTyped = currentNode.value as { name?: string } | null;
+    const nodeName = currentNodeTyped && currentNodeTyped.name ? currentNodeTyped.name : 'mapp';
+    showStatus(`Visar innehåll från "${nodeName}"`, 'info');
   } catch (error) {
     console.error('Error selecting node:', error);
     showStatus('Kunde inte ladda mapinnehåll', 'error');

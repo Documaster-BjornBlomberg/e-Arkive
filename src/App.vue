@@ -15,13 +15,20 @@ onMounted(async () => {
   
   // Load user theme preference
   loadTheme();
-  
-  // Add navigation guard
+    // Add navigation guard
   router.beforeEach((to: RouteLocationNormalized, from: RouteLocationNormalized, next) => {
     if (to.meta.requiresAuth && !isAuthenticated.value) {
       next('/login');
     } else if (to.path === '/login' && isAuthenticated.value) {
       next('/list');
+    } else if (to.meta.adminOnly) {
+      // For now, we'll allow all authenticated users to access admin
+      // In a production environment, you would check if the user has admin privileges
+      if (!isAuthenticated.value) {
+        next('/login');
+      } else {
+        next();
+      }
     } else {
       next();
     }
@@ -45,6 +52,10 @@ onMounted(async () => {
   --button-text: #ffffff;
   --error-color: #e74c3c;
   --success-color: #2ecc71;
+  --primary-color: #4CAF50;
+  --primary-color-light: rgba(76, 175, 80, 0.1);
+  --hover-color: rgba(0, 0, 0, 0.05);
+  --input-background: #ffffff;
 }
 
 [data-theme="dark"] {
@@ -55,6 +66,10 @@ onMounted(async () => {
   --border-color: #404040;
   --button-bg: #45a049;
   --button-hover-bg: #4CAF50;
+  --primary-color: #4CAF50;
+  --primary-color-light: rgba(76, 175, 80, 0.2);
+  --hover-color: rgba(255, 255, 255, 0.1);
+  --input-background: #333333;
 }
 
 body {

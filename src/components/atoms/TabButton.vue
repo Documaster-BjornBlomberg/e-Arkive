@@ -1,47 +1,51 @@
 <template>
   <button 
+    class="tab-button" 
+    :class="{ active }"
     @click="$emit('click')"
-    :class="{ 'active': isActive }"
-    class="tab-btn"
   >
-    {{ label }}
+    <span v-if="icon" class="material-icons icon">{{ icon }}</span>
+    <slot></slot>
   </button>
 </template>
 
-<script setup>
-defineProps({
-  label: {
-    type: String,
-    required: true
-  },
-  isActive: {
-    type: Boolean,
-    default: false
-  }
-});
+<script setup lang="ts">
+defineProps<{
+  active?: boolean;
+  icon?: string;
+}>();
 
 defineEmits(['click']);
 </script>
 
 <style scoped>
-.tab-btn {
+.tab-button {
   background: none;
   border: none;
-  padding: 8px 15px;
+  padding: 12px 20px;
+  color: var(--text-color-secondary);
+  font-size: 15px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
   cursor: pointer;
-  border-radius: 4px 4px 0 0;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-button:hover {
   color: var(--text-color);
-  opacity: 0.7;
+  background-color: var(--hover-color);
 }
 
-.tab-btn.active {
-  border-bottom: 2px solid var(--button-bg);
-  opacity: 1;
-  font-weight: bold;
+.tab-button.active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+  background-color: var(--primary-color-light);
 }
 
-.tab-btn:hover {
-  background-color: rgba(128, 128, 128, 0.1);
+.icon {
+  font-size: 18px;
 }
 </style>

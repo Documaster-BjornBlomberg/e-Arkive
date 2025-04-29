@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"graphql-backend/graph/model"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -634,7 +635,7 @@ func (r *mutationResolver) Login(ctx context.Context, username string, password 
 	var id string
 	var passwordHash string
 	var name string
-	err := r.DB.QueryRow("SELECT id, password_hash, username FROM users WHERE username = ?", username).Scan(&id, &passwordHash, &name)
+	err := r.DB.QueryRow("SELECT id, password_hash, name FROM users WHERE username = ?", username).Scan(&id, &passwordHash, &name)
 
 	// Check if user exists
 	if err == sql.ErrNoRows {
@@ -733,10 +734,10 @@ func (r *mutationResolver) Register(ctx context.Context, username string, passwo
 		}
 	}()
 
-	// Insert the new user
+	// Insert the new user (use username as name)
 	result, err := tx.Exec(
-		"INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, datetime('now'))",
-		username, string(hashedPassword),
+		"INSERT INTO users (username, name, password_hash, created_at) VALUES (?, ?, ?, datetime('now'))",
+		username, username, string(hashedPassword),
 	)
 	if err != nil {
 		log.Printf("Error inserting user: %v", err)
@@ -1430,6 +1431,380 @@ func (r *mutationResolver) SetNodeOwnership(ctx context.Context, nodeID string, 
 	return getNodeWithPermissions(ctx, r.DB, nodeID)
 }
 
+// CreateUser creates a new user with the provided username, password and optional name
+func (r *mutationResolver) CreateUser(ctx context.Context, username string, password string, name *string) (*model.User, error) {
+	logAction(fmt.Sprintf("Creating new user with username: %s", username))
+
+	// Get current user from context to verify permissions
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unauthorized: %v", err)
+	}
+
+	// Check if the current user is an administrator or has PERM_MANAGE_USER permission
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, currentUserID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return nil, fmt.Errorf("permission denied: must be an administrator to create users")
+	}
+
+	// Check if username already exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	if exists {
+		return nil, fmt.Errorf("username already taken")
+	}
+
+	// Default name to username if not provided
+	userName := username
+	if name != nil && *name != "" {
+		userName = *name
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		return nil, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Insert the new user
+	result, err := r.DB.Exec(
+		"INSERT INTO users (username, name, password_hash, created_at) VALUES (?, ?, ?, datetime('now'))",
+		username, userName, string(hashedPassword),
+	)
+	if err != nil {
+		log.Printf("Error creating user: %v", err)
+		return nil, fmt.Errorf("failed to create user: %v", err)
+	}
+
+	userID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Error retrieving user ID: %v", err)
+		return nil, fmt.Errorf("failed to retrieve user ID: %v", err)
+	}
+
+	log.Printf("User created successfully with ID: %d", userID)
+
+	// Return the created user
+	return &model.User{
+		ID:       fmt.Sprintf("%d", userID),
+		Name:     userName,
+		Username: username,
+	}, nil
+}
+
+// UpdateUser updates an existing user's username and/or name
+func (r *mutationResolver) UpdateUser(ctx context.Context, id string, username *string, name *string) (*model.User, error) {
+	logAction(fmt.Sprintf("Updating user with ID: %s", id))
+
+	// Get current user from context to verify permissions
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unauthorized: %v", err)
+	}
+
+	// Check if the user exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return nil, fmt.Errorf("failed to check if user exists: %v", err)
+	}
+
+	if !exists {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	// Special protection for user 1 (admin)
+	userIDInt, _ := strconv.Atoi(id)
+	if userIDInt == 1 {
+		// For user 1, only allow updates if the current user is user 1
+		currentUserIDInt, _ := strconv.Atoi(currentUserID)
+		if currentUserIDInt != 1 {
+			return nil, fmt.Errorf("permission denied: only user 1 can update their own account information")
+		}
+	} else {
+		// For other users, check if current user is an admin
+		var isAdmin bool
+		err = r.DB.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1 
+				FROM group_members gm
+				JOIN groups g ON gm.group_id = g.id
+				WHERE gm.user_id = ? AND g.name = 'Administrators'
+			)
+		`, currentUserID).Scan(&isAdmin)
+
+		if err != nil {
+			log.Printf("Error checking admin status: %v", err)
+			return nil, fmt.Errorf("failed to check administrator status: %v", err)
+		}
+
+		if !isAdmin {
+			return nil, fmt.Errorf("permission denied: must be an administrator to update users")
+		}
+	}
+
+	// Check if username already exists (if username is being changed)
+	if username != nil && *username != "" {
+		var usernameExists bool
+		err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = ? AND id != ?)", *username, id).Scan(&usernameExists)
+		if err != nil {
+			log.Printf("Error checking if username exists: %v", err)
+			return nil, fmt.Errorf("failed to check if username exists: %v", err)
+		}
+
+		if usernameExists {
+			return nil, fmt.Errorf("username already taken")
+		}
+	}
+
+	// Build update query dynamically based on which fields are provided
+	query := "UPDATE users SET"
+	args := []interface{}{}
+	requiresComma := false
+
+	if username != nil && *username != "" {
+		query += " username = ?"
+		args = append(args, *username)
+		requiresComma = true
+	}
+
+	if name != nil {
+		if requiresComma {
+			query += ","
+		}
+		query += " name = ?"
+		args = append(args, *name)
+	}
+
+	// If no fields were provided, return the user without updating
+	if len(args) == 0 {
+		return r.getUserById(ctx, id)
+	}
+
+	query += " WHERE id = ?"
+	args = append(args, id)
+
+	// Execute the update
+	_, err = r.DB.Exec(query, args...)
+	if err != nil {
+		log.Printf("Error updating user: %v", err)
+		return nil, fmt.Errorf("failed to update user: %v", err)
+	}
+
+	log.Printf("User with ID %s updated successfully", id)
+
+	// Return the updated user
+	return r.getUserById(ctx, id)
+}
+
+// UpdateUserPassword updates a user's password (requires admin or self with special rules for user 1)
+func (r *mutationResolver) UpdateUserPassword(ctx context.Context, userID string, newPassword string) (bool, error) {
+	logAction(fmt.Sprintf("Updating password for user ID: %s", userID))
+
+	// Get current user from context to verify permissions
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, fmt.Errorf("unauthorized: %v", err)
+	}
+
+	// Check if target user exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return false, fmt.Errorf("failed to check if user exists: %v", err)
+	}
+
+	if !exists {
+		return false, fmt.Errorf("user not found")
+	}
+
+	// Special protection for user 1 (admin)
+	userIDInt, _ := strconv.Atoi(userID)
+	currentUserIDInt, _ := strconv.Atoi(currentUserID)
+
+	if userIDInt == 1 {
+		// Only user 1 can update user 1's password
+		if currentUserIDInt != 1 {
+			return false, fmt.Errorf("permission denied: only user 1 can update their own password")
+		}
+	} else {
+		// For other users, check if current user is an admin or the user themselves
+		var isAdmin bool
+		if currentUserIDInt != userIDInt {
+			// If not updating own password, must be admin
+			err = r.DB.QueryRow(`
+				SELECT EXISTS(
+					SELECT 1 
+					FROM group_members gm
+					JOIN groups g ON gm.group_id = g.id
+					WHERE gm.user_id = ? AND g.name = 'Administrators'
+				)
+			`, currentUserID).Scan(&isAdmin)
+
+			if err != nil {
+				log.Printf("Error checking admin status: %v", err)
+				return false, fmt.Errorf("failed to check administrator status: %v", err)
+			}
+
+			if !isAdmin {
+				return false, fmt.Errorf("permission denied: must be an administrator to update another user's password")
+			}
+		}
+	}
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		return false, fmt.Errorf("internal server error: %v", err)
+	}
+
+	// Update the password
+	_, err = r.DB.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(hashedPassword), userID)
+	if err != nil {
+		log.Printf("Error updating password: %v", err)
+		return false, fmt.Errorf("failed to update password: %v", err)
+	}
+
+	log.Printf("Password updated successfully for user ID: %s", userID)
+	return true, nil
+}
+
+// DeleteUser deletes a user by ID (with protection for admin user)
+func (r *mutationResolver) DeleteUser(ctx context.Context, id string) (bool, error) {
+	logAction(fmt.Sprintf("Attempting to delete user with ID: %s", id))
+
+	// Get current user from context to verify permissions
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return false, fmt.Errorf("unauthorized: %v", err)
+	}
+
+	// Special protection for user 1 (admin) - cannot be deleted
+	userIDInt, err := strconv.Atoi(id)
+	if err != nil {
+		return false, fmt.Errorf("invalid user ID: %v", err)
+	}
+
+	if userIDInt == 1 {
+		return false, fmt.Errorf("permission denied: the admin user (ID 1) cannot be deleted")
+	}
+
+	// Check if the user exists
+	var exists bool
+	err = r.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error checking if user exists: %v", err)
+		return false, fmt.Errorf("failed to check if user exists: %v", err)
+	}
+
+	if !exists {
+		return false, fmt.Errorf("user not found")
+	}
+
+	// Check if the current user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, currentUserID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return false, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return false, fmt.Errorf("permission denied: must be an administrator to delete users")
+	}
+
+	// Begin a transaction to handle user deletion
+	tx, err := r.DB.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		return false, fmt.Errorf("internal server error: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete user's group memberships
+	_, err = tx.Exec("DELETE FROM group_members WHERE user_id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting user group memberships: %v", err)
+		return false, fmt.Errorf("failed to delete user group memberships: %v", err)
+	}
+
+	// Delete user's settings
+	_, err = tx.Exec("DELETE FROM user_settings WHERE user_id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting user settings: %v", err)
+		return false, fmt.Errorf("failed to delete user settings: %v", err)
+	}
+
+	// Set any nodes owned by this user to NULL owner
+	_, err = tx.Exec("UPDATE nodes SET owner_user_id = NULL WHERE owner_user_id = ?", id)
+	if err != nil {
+		log.Printf("Error updating node ownership: %v", err)
+		return false, fmt.Errorf("failed to update node ownership: %v", err)
+	}
+
+	// Finally, delete the user
+	result, err := tx.Exec("DELETE FROM users WHERE id = ?", id)
+	if err != nil {
+		log.Printf("Error deleting user: %v", err)
+		return false, fmt.Errorf("failed to delete user: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		return false, fmt.Errorf("error confirming deletion: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		tx.Rollback()
+		return false, fmt.Errorf("user not found")
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		return false, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("User with ID %s deleted successfully", id)
+	return true, nil
+}
+
 // GetFiles är resolvern för getFiles-fältet
 // Hämtar alla filer från databasen med tillhörande metadata
 func (r *queryResolver) GetFiles(ctx context.Context) ([]*model.File, error) {
@@ -2017,6 +2392,62 @@ func (r *queryResolver) GetUserByID(ctx context.Context, id string) (*model.User
 	}
 
 	return &user, nil
+}
+
+// GetUsers returns all users in the system
+func (r *queryResolver) GetUsers(ctx context.Context) ([]*model.User, error) {
+	logAction("Fetching all users")
+
+	// Get current user from context to verify permissions
+	currentUserID, err := getUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unauthorized: %v", err)
+	}
+
+	// Check if the current user is an administrator
+	var isAdmin bool
+	err = r.DB.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 
+			FROM group_members gm
+			JOIN groups g ON gm.group_id = g.id
+			WHERE gm.user_id = ? AND g.name = 'Administrators'
+		)
+	`, currentUserID).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		return nil, fmt.Errorf("failed to check administrator status: %v", err)
+	}
+
+	if !isAdmin {
+		return nil, fmt.Errorf("permission denied: must be an administrator to list all users")
+	}
+
+	// Query all users
+	rows, err := r.DB.Query("SELECT id, username, name FROM users")
+	if err != nil {
+		log.Printf("Error querying users: %v", err)
+		return nil, fmt.Errorf("failed to query users: %v", err)
+	}
+	defer rows.Close()
+
+	var users []*model.User
+	for rows.Next() {
+		var user model.User
+		if err := rows.Scan(&user.ID, &user.Username, &user.Name); err != nil {
+			log.Printf("Error scanning user row: %v", err)
+			return nil, fmt.Errorf("failed to scan user data: %v", err)
+		}
+		users = append(users, &user)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating through users: %v", err)
+		return nil, fmt.Errorf("error reading user data: %v", err)
+	}
+
+	return users, nil
 }
 
 // User implementerar Todo.user

@@ -13,44 +13,35 @@
   </button>
 </template>
 
-<script setup>
-defineProps({
-  variant: {
-    type: String,
-    default: 'default',
-    validator: (value) => ['default', 'primary', 'success', 'warning', 'danger', 'info'].includes(value)
-  },
-  icon: {
-    type: String,
-    default: ''
-  },
-  title: {
-    type: String,
-    default: ''
-  },
-  fullWidth: {
-    type: Boolean,
-    default: false
-  },
-  disabled: {
-    type: Boolean,
-    default: false
-  },
-  loading: {
-    type: Boolean,
-    default: false
-  },
-  type: {
-    type: String,
-    default: 'button'
-  },
-  primary: {
-    type: Boolean,
-    default: false
-  }
+<script setup lang="ts">
+type ButtonVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
+type ButtonType = 'button' | 'submit' | 'reset';
+
+interface Props {
+  variant?: ButtonVariant;
+  icon?: string;
+  title?: string;
+  fullWidth?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  type?: ButtonType;
+  primary?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  variant: 'default',
+  icon: '',
+  title: '',
+  fullWidth: false,
+  disabled: false,
+  loading: false,
+  type: 'button',
+  primary: false
 });
 
-defineEmits(['click']);
+defineEmits<{
+  (e: 'click', event: MouseEvent): void;
+}>();
 </script>
 
 <style scoped>

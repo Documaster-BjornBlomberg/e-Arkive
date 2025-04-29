@@ -14,6 +14,7 @@ DROP TABLE IF EXISTS users;
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
+    name TEXT,
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -120,3 +121,31 @@ VALUES (1, 'Root', NULL, 1, 1, 63, datetime('now'), datetime('now'));
 
 -- Set ownership of existing nodes to admin and admin group
 UPDATE nodes SET owner_user_id = 1, owner_group_id = 1, permissions = 63 WHERE owner_user_id IS NULL;
+
+-- Update existing users table to add name column if it doesn't exist
+PRAGMA foreign_keys=off;
+
+-- Check if name column exists, if not add it
+BEGIN TRANSACTION;
+
+-- Create a temporary table with the new schema
+CREATE TABLE IF NOT EXISTS users_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    name TEXT,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- Copy data from the old table to the new one
+INSERT INTO users_new (id, username, name, password_hash, created_at)
+SELECT id, username, username, password_hash, created_at FROM users;
+
+-- Drop the old table
+DROP TABLE users;
+
+-- Rename the new table to the old table name
+ALTER TABLE users_new RENAME TO users;
+
+COMMIT;
+PRAGMA foreign_keys=on;

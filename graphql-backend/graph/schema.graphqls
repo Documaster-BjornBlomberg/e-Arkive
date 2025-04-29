@@ -68,6 +68,7 @@ type Query {
   getGroup(id: ID!): Group
   getUserGroups: [Group!]!
   getUserById(id: ID!): User
+  getUsers: [User!]!
 }
 
 type Mutation {
@@ -93,6 +94,10 @@ type Mutation {
   removeUserFromGroup(userId: ID!, groupId: ID!): Boolean!
   setNodePermissions(nodeId: ID!, permissions: Int!): Node!
   setNodeOwnership(nodeId: ID!, ownerUserId: ID, ownerGroupId: ID): Node!
+  createUser(username: String!, password: String!, name: String): User!
+  updateUser(id: ID!, username: String, name: String): User!
+  updateUserPassword(userId: ID!, newPassword: String!): Boolean!
+  deleteUser(id: ID!): Boolean!
 }
 
 type File {

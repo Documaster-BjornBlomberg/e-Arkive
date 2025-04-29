@@ -2,11 +2,12 @@
   "name": "e-arkive",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
-  "scripts": {
+  "type": "module",  "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "vue-tsc --noEmit",
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@graphiql/plugin-explorer": "^3.2.5",
@@ -21,7 +22,6 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/tsconfig": "^0.7.0",
     "typescript": "^5.8.3",
-    "vite": "^6.2.0",
-    "vue-tsc": "^2.2.10"
+    "vite": "^6.2.0"
   }
 }

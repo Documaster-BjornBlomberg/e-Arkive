@@ -1,7 +1,6 @@
 <template>
   <header class="header-section">
-    <h1>{{ title || 'e-Arkive' }}</h1>
-    <nav v-if="isAuthenticated" class="nav-links">
+    <h1>{{ title || 'e-Arkive' }}</h1>    <nav v-if="isAuthenticated" class="nav-links">
       <router-link to="/list" class="nav-link" active-class="active">
         <span class="material-icons">list</span>
         <span>Dokumentlista</span>
@@ -13,6 +12,10 @@
       <router-link to="/settings" class="nav-link" active-class="active">
         <span class="material-icons">settings</span>
         <span>Inställningar</span>
+      </router-link>
+      <router-link to="/admin" class="nav-link" active-class="active">
+        <span class="material-icons">admin_panel_settings</span>
+        <span>Administrera</span>
       </router-link>
     </nav>
     <div class="header-actions">

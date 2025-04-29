@@ -1,75 +1,39 @@
 <template>
-  <div v-if="isOpen" class="modal-overlay" @click.self="closeModal">
-    <div class="modal-container">
+  <div class="modal-backdrop" @click.self="$emit('close')">
+    <div class="modal-content">
       <div class="modal-header">
-        <h2>{{ title }}</h2>
-        <Icon name="close" class="close-icon" @click="closeModal" />
+        <slot name="header">
+          <h3>Modal Title</h3>
+        </slot>
+        <button class="modal-close" @click="$emit('close')">&times;</button>
       </div>
-      <div class="modal-content">
-        <slot></slot>
+      
+      <div class="modal-body">
+        <slot name="body">
+          <p>Modal content goes here...</p>
+        </slot>
       </div>
+      
       <div class="modal-footer">
-        <Button v-if="showCancel" variant="secondary" @click="closeModal">Cancel</Button>
-        <Button v-if="showConfirm" :variant="confirmVariant" @click="confirm">{{ confirmText }}</Button>
+        <slot name="footer">
+          <button @click="$emit('close')" class="btn">Close</button>
+        </slot>
       </div>
     </div>
   </div>
 </template>
 
-<script>
-import Icon from '../atoms/Icon.vue'
-import Button from '../atoms/Button.vue'
-
-export default {
-  name: 'Modal',
-  components: {
-    Icon,
-    Button
-  },
-  props: {
-    isOpen: {
-      type: Boolean,
-      default: false
-    },
-    title: {
-      type: String,
-      default: 'Modal Title'
-    },
-    showCancel: {
-      type: Boolean,
-      default: true
-    },
-    showConfirm: {
-      type: Boolean,
-      default: true
-    },
-    confirmText: {
-      type: String,
-      default: 'Confirm'
-    },
-    confirmVariant: {
-      type: String,
-      default: 'primary'
-    }
-  },
-  methods: {
-    closeModal() {
-      this.$emit('close')
-    },
-    confirm() {
-      this.$emit('confirm')
-    }
-  }
-}
+<script setup lang="ts">
+defineEmits(['close']);
 </script>
 
 <style scoped>
-.modal-overlay {
+.modal-backdrop {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
+  right: 0;
+  bottom: 0;
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
@@ -77,39 +41,71 @@ export default {
   z-index: 1000;
 }
 
-.modal-container {
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+.modal-content {
   width: 90%;
   max-width: 500px;
+  background-color: var(--background-color);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
   max-height: 90vh;
-  overflow-y: auto;
 }
 
 .modal-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  border-bottom: 1px solid #eee;
 }
 
-.modal-content {
-  padding: 1rem;
-  max-height: 60vh;
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-color);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  font-weight: bold;
+  cursor: pointer;
+  color: var(--text-color-secondary);
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.modal-close:hover {
+  background-color: var(--hover-color);
+}
+
+.modal-body {
+  padding: 16px;
   overflow-y: auto;
+  flex: 1;
 }
 
 .modal-footer {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 1rem;
-  border-top: 1px solid #eee;
+  gap: 8px;
 }
 
-.close-icon {
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
+  font-weight: 500;
 }
 </style>

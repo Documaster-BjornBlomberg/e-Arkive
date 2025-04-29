@@ -702,3 +702,33 @@ func (r *userResolver) Settings(ctx context.Context, obj *model.User) ([]*model.
 func (r *Resolver) GetNodeById(ctx context.Context, id string) (*model.Node, error) {
 	return getNodeById(ctx, r.DB, id)
 }
+
+// =============================================
+// ========== USER FUNKTIONER ===========
+// =============================================
+
+// getUserById retrieves a user by ID
+func (r *queryResolver) getUserById(ctx context.Context, id string) (*model.User, error) {
+	var user model.User
+	err := r.DB.QueryRow("SELECT id, username, name FROM users WHERE id = ?", id).Scan(
+		&user.ID, &user.Username, &user.Name)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		log.Printf("Error querying user by ID: %v", err)
+		return nil, fmt.Errorf("failed to query user: %v", err)
+	}
+
+	// Get user's groups
+	groups, err := getUserGroups(ctx, r.DB, id)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch user's groups: %v", err)
+		// Continue without groups, it's not critical
+	} else {
+		user.Groups = groups
+	}
+
+	return &user, nil
+}

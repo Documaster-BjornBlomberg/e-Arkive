@@ -5,6 +5,7 @@ export interface User {
   name: string;
   username: string;
   settings?: UserSetting[];
+  groups?: Group[];
 }
 
 export interface UserSetting {
@@ -13,6 +14,12 @@ export interface UserSetting {
   value: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  members?: User[];
 }
 
 export interface Node {
@@ -24,6 +31,11 @@ export interface Node {
   children?: Node[];
   parent?: Node;
   files?: File[];
+  ownerUserId?: string;
+  ownerGroupId?: string;
+  ownerUser?: User;
+  ownerGroup?: Group;
+  permissions?: number;
 }
 
 export interface File {
@@ -60,14 +72,41 @@ export interface MetadataInput {
 export interface NodeInput {
   name: string;
   parentId?: string;
+  ownerUserId?: string;
+  ownerGroupId?: string;
+  permissions?: number;
 }
 
 export interface NodeUpdateInput {
   name?: string;
   parentId?: string;
+  ownerUserId?: string;
+  ownerGroupId?: string;
+  permissions?: number;
 }
 
 export interface AuthPayload {
   token: string;
   user: User;
+}
+
+export interface UserInput {
+  name: string;
+  username: string;
+  password: string;
+}
+
+export interface UserUpdateInput {
+  id: string;
+  name?: string;
+  password?: string;
+}
+
+export interface GroupInput {
+  name: string;
+}
+
+export interface GroupUpdateInput {
+  id: string;
+  name: string;
 }

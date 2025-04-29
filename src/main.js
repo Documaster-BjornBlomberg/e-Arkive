@@ -7,6 +7,7 @@ import UploadPage from './components/pages/UploadPage.vue'
 import ListPage from './components/pages/ListPage.vue'
 import LoginPage from './components/pages/LoginPage.vue'
 import SettingsPage from './components/pages/SettingsPage.vue'
+import AdminPage from './components/pages/AdminPage.vue'
 
 // Define routes
 const routes = [
@@ -29,6 +30,11 @@ const routes = [
     path: '/settings', 
     component: SettingsPage,
     meta: { requiresAuth: true }
+  },
+  { 
+    path: '/admin', 
+    component: AdminPage,
+    meta: { requiresAuth: true, adminOnly: true }
   },
   { path: '/', redirect: '/list' },
 ]
